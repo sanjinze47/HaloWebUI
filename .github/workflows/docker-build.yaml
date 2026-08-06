@@ -7,6 +7,10 @@ on:
         description: Optional semver image version to publish from the selected ref
         required: false
         type: string
+      source_ref:
+        description: Optional source branch or tag to build
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -31,6 +35,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -84,6 +90,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -91,7 +99,10 @@ jobs:
           node-version: '22'
 
       - name: Read application version
-        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "WEBUI_VERSION=$version" >> "$GITHUB_ENV"
+          echo "WEBUI_BUILD_HASH=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Normalize manual version tag
         if: inputs.version_tag != ''
@@ -139,7 +150,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-main-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
             WEBUI_VERSION=${{ env.WEBUI_VERSION }}
-            WEBUI_BUILD_HASH=${{ github.sha }}
+            WEBUI_BUILD_HASH=${{ env.WEBUI_BUILD_HASH }}
             HALO_RUNTIME_PROFILE=main
 
       - name: Export digest
@@ -175,6 +186,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -182,7 +195,9 @@ jobs:
           node-version: '22'
 
       - name: Read application version
-        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "WEBUI_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Normalize manual version tag
         if: inputs.version_tag != ''
@@ -262,6 +277,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -269,7 +286,10 @@ jobs:
           node-version: '22'
 
       - name: Read application version
-        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "WEBUI_VERSION=$version" >> "$GITHUB_ENV"
+          echo "WEBUI_BUILD_HASH=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Normalize manual version tag
         if: inputs.version_tag != ''
@@ -314,7 +334,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-slim-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
             WEBUI_VERSION=${{ env.WEBUI_VERSION }}
-            WEBUI_BUILD_HASH=${{ github.sha }}
+            WEBUI_BUILD_HASH=${{ env.WEBUI_BUILD_HASH }}
             HALO_RUNTIME_PROFILE=slim
 
       - name: Export digest
@@ -348,6 +368,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -355,7 +377,9 @@ jobs:
           node-version: '22'
 
       - name: Read application version
-        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "WEBUI_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Normalize manual version tag
         if: inputs.version_tag != ''
