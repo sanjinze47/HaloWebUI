@@ -51,6 +51,7 @@ Use `npm run dev` for the frontend and the backend development command documente
 - Do not claim that a commit, tag, GitHub Release, or Docker image was published unless the command and remote result succeeded.
 - If GitHub credentials, package permissions, or required tools are unavailable, stop before publishing and report the exact blocker.
 - GHCR image names are lowercase: `ghcr.io/sanjinze47/halowebui`.
+- GHCR publishing uses the repository Actions secret `GHCR_TOKEN` with `read:packages` and `write:packages` scopes; never place this token in source files.
 - `latest` tracks successful `main` builds; immutable version tags track `vX.Y.Z` releases.
 
 ## Pull request expectations

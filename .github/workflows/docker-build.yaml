@@ -2,6 +2,11 @@ name: Create and publish Docker images with specific build args
 
 on:
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: Optional semver image tag to publish from the selected ref
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -31,10 +36,12 @@ jobs:
         with:
           node-version: '22'
       - name: Validate tag against package version
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.version_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.version_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${RELEASE_TAG}"
           version="$(node -p "require('./package.json').version")"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: $tag (expected vX.Y.Z)" >&2
@@ -85,7 +92,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Extract metadata for Docker images (default latest tag)
         id: meta
@@ -98,6 +105,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
           flavor: |
             latest=${{ github.ref == 'refs/heads/main' }}
 
@@ -163,7 +171,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Extract metadata for Docker images (default latest tag)
         id: meta
@@ -176,6 +184,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
           flavor: |
             latest=${{ github.ref == 'refs/heads/main' }}
 
@@ -227,7 +236,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Extract metadata for Docker images (slim tag)
         id: meta
@@ -239,6 +248,7 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=semver,pattern={{major}}.{{minor}}-slim
+            type=raw,value=${{ inputs.version_tag }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Build Docker image (slim)
         uses: docker/build-push-action@v6
@@ -300,7 +310,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Extract metadata for Docker images (slim tag)
         id: meta
@@ -312,6 +322,7 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=semver,pattern={{major}}.{{minor}}-slim
+            type=raw,value=${{ inputs.version_tag }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests

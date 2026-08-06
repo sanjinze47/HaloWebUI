@@ -94,6 +94,8 @@ WEBUI_DOCKER_TAG=0.1.0 docker compose up -d
 echo "$CR_PAT" | docker login ghcr.io -u sanjinze47 --password-stdin
 ```
 
+GitHub Actions 发布 GHCR 镜像使用仓库 Secret `GHCR_TOKEN`。该令牌只需要 `read:packages` 和 `write:packages` 权限，并应在到期前轮换；不要将令牌提交到仓库。
+
 ### 首屏加载优化
 
 如果后端服务器带宽较低，首屏加载可能会变慢。推荐把浏览器访问入口放在 Nginx 或 CDN 后面，让前端静态资源就近缓存，接口和实时聊天仍然转发到后端服务。
