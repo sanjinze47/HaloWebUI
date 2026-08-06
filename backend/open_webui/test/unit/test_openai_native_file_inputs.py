@@ -692,21 +692,22 @@ def test_ensure_requested_chat_file_modes_prefers_local_before_remote(monkeypatc
     )
     user = SimpleNamespace(id="user-1")
 
-    asyncio.run(
-        middleware._ensure_requested_chat_file_modes(
-            request,
-            metadata,
-            user,
-            {"id": "gpt-5.4", "owned_by": "openai"},
-            fake_event_emitter,
-        )
-    )
+    import pytest
 
-    assert len(calls) == 1
-    assert calls[0]["provider"] == "local_default"
-    assert calls[0]["allow_provider_local_fallback"] is False
-    assert events
-    assert "local document parsing" in events[0]["data"]["content"]
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(
+            middleware._ensure_requested_chat_file_modes(
+                request,
+                metadata,
+                user,
+                {"id": "gpt-5.4", "owned_by": "openai"},
+                fake_event_emitter,
+            )
+        )
+
+    assert getattr(excinfo.value, "status_code", None) == 502
+    assert not calls
+    assert not events
 
 
 def test_native_file_cache_retry_detection_and_clear(monkeypatch):

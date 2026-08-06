@@ -25,6 +25,8 @@ from open_webui.env import (
     SRC_LOG_LEVELS,
 )
 from open_webui.models.files import Files
+from open_webui.models.models import Models
+from open_webui.models.users import Users
 from open_webui.routers import gemini as gemini_router
 from open_webui.routers import grok as grok_router
 from open_webui.routers import openai as openai_router
@@ -34,7 +36,7 @@ from open_webui.utils.chat_image_refs import (
     resolve_chat_image_url_to_bytes,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_read_resource, has_permission
 from open_webui.utils.api_key_pool import (
     get_api_key_attempts,
     normalize_api_key_pool_config,
@@ -180,6 +182,16 @@ OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE = re.compile(
     re.IGNORECASE,
 )
 OPENAI_IMAGE_ALLOWED_SIZES = {"1024x1024", "1536x1024", "1024x1536"}
+GPT_IMAGE_2_SIZE_CONSTRAINTS = {
+    "min_width": 16,
+    "min_height": 16,
+    "max_dimension": 3840,
+    "max_aspect_ratio": 3,
+    "min_pixels": 655_360,
+    "max_pixels": 8_294_400,
+    "multiple_of": 16,
+    "presets": ["1024x1024", "2048x2048", "2048x1152", "1152x2048", "3840x2160"],
+}
 OPENAI_IMAGE_ROUTE_GENERATIONS = "generations"
 OPENAI_IMAGE_ROUTE_EDITS = "edits"
 OPENAI_IMAGE_ROUTE_CHAT = "chat"
@@ -343,6 +355,11 @@ def _normalize_engine(value: Optional[str]) -> str:
 
 def _is_non_empty(value: Optional[str]) -> bool:
     return isinstance(value, str) and value.strip() != ""
+
+
+def _secret_status(value: Any) -> dict[str, bool]:
+    """Expose only whether a server-side secret exists, never its value."""
+    return {"configured": _is_non_empty(str(value or ""))}
 
 
 def _parse_comfyui_workflow_config(request: Request) -> dict:
@@ -1288,6 +1305,60 @@ def _resolve_image_provider_source(
     return sources[0] if sources else None
 
 
+def _apply_image_model_owner_context(
+    request: Request,
+    user,
+    model_id: str,
+    model_ref: Optional[dict[str, Any]] = None,
+) -> None:
+    """Use the saved model owner's connections for shared image models.
+
+    The resolved source contains credentials only on the server side. This helper
+    only changes request state, so capability responses remain safe for clients.
+    """
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        return
+    try:
+        owner_id = None
+        if isinstance(model_ref, dict):
+            normalized_model_id = str(
+                model_ref.get("model_id") or normalized_model_id
+            ).strip()
+        parsed = parse_selection_id(normalized_model_id)
+        if parsed:
+            normalized_model_id = str(parsed.get("model_id") or "").strip()
+            model_ref = parsed.get("model_ref") or {}
+        else:
+            _hint, normalized_model_id = _split_image_model_selection_key(
+                normalized_model_id
+            )
+        model = Models.get_model_by_id(normalized_model_id)
+        if model and not can_read_resource(user, model):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+        owner_id = owner_id or (getattr(model, "user_id", None) if model else None)
+        if not owner_id:
+            for candidate in Models.get_models():
+                if str(getattr(candidate, "base_model_id", "") or "").strip() == normalized_model_id:
+                    owner_id = getattr(candidate, "user_id", None)
+                    break
+        if owner_id and owner_id != getattr(user, "id", None):
+            owner = Users.get_user_by_id(owner_id)
+            if owner:
+                from open_webui.utils.user_connections import maybe_migrate_user_connections
+
+                request.state.connection_user = maybe_migrate_user_connections(
+                    request, owner
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        log.debug("Unable to resolve image model owner context", exc_info=True)
+
+
 def _list_image_provider_sources(
     request: Request,
     user,
@@ -1785,6 +1856,8 @@ def _build_image_model_entry(
     supported_image_routes: Optional[list[str]] = None,
     default_image_route: Optional[str] = None,
     reference_image_default_route: Optional[str] = None,
+    supports_custom_size: bool = False,
+    size_constraints: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     provider = source.get("provider") if isinstance(source, dict) else None
     effective_source = (
@@ -1913,6 +1986,8 @@ def _build_image_model_entry(
             "supported_image_routes": normalized_routes,
             "default_image_route": normalized_default_route,
             "reference_image_default_route": normalized_reference_default_route,
+            "supports_custom_size": bool(supports_custom_size),
+            "size_constraints": dict(size_constraints or {}),
         }
     return {
         "id": model_id,
@@ -1939,6 +2014,8 @@ def _build_image_model_entry(
         "supported_image_routes": normalized_routes,
         "default_image_route": normalized_default_route,
         "reference_image_default_route": normalized_reference_default_route,
+        "supports_custom_size": bool(supports_custom_size),
+        "size_constraints": dict(size_constraints or {}),
         "text_output_supported": bool(text_output_supported),
         "source": source.get("effective_source") if isinstance(source, dict) else None,
         "connection_index": (
@@ -2073,6 +2150,7 @@ def _classify_openai_image_model(
         set(supported_image_routes),
         generation_mode,
     )
+    is_gpt_image_2 = _is_gpt_image_2_model(base_name, model_id)
 
     return _build_image_model_entry(
         model_id=model_id,
@@ -2090,11 +2168,21 @@ def _classify_openai_image_model(
         supports_batch=generation_mode == "openai_images",
         size_mode="exact" if generation_mode == "openai_images" else "aspect_ratio",
         supports_resolution=False,
+        supports_image_size=is_gpt_image_2,
+        supports_custom_size=is_gpt_image_2,
+        size_constraints=(GPT_IMAGE_2_SIZE_CONSTRAINTS if is_gpt_image_2 else None),
         text_output_supported=(output_has_text and not is_dedicated_image_model)
         or generation_mode == "openai_chat_image",
         source=source,
         supported_image_routes=supported_image_routes,
         default_image_route=default_image_route,
+    )
+
+
+def _is_gpt_image_2_model(*values: Any) -> bool:
+    return any(
+        re.search(r"(?:^|[/:._-])gpt-image-2(?:$|[/:._-])", str(value or ""), re.I)
+        for value in values
     )
 
 
@@ -2335,6 +2423,7 @@ def _build_image_model_search_candidate(
             source=source,
         )
     else:
+        is_gpt_image_2 = _is_gpt_image_2_model(model_id, name)
         entry = _build_image_model_entry(
             model_id=model_id,
             name=name,
@@ -2343,7 +2432,9 @@ def _build_image_model_search_candidate(
             supports_background=False,
             supports_batch=True,
             size_mode="exact",
-            supports_image_size=False,
+            supports_image_size=is_gpt_image_2,
+            supports_custom_size=is_gpt_image_2,
+            size_constraints=(GPT_IMAGE_2_SIZE_CONSTRAINTS if is_gpt_image_2 else None),
             text_output_supported=False,
             source=source,
             supported_image_routes=[OPENAI_IMAGE_ROUTE_GENERATIONS],
@@ -2360,6 +2451,8 @@ def _build_image_model_search_candidate(
             "supports_background": entry.get("supports_background"),
             "supports_batch": entry.get("supports_batch"),
             "supports_image_size": entry.get("supports_image_size"),
+            "supports_custom_size": entry.get("supports_custom_size"),
+            "size_constraints": entry.get("size_constraints"),
             "supports_resolution": entry.get("supports_resolution"),
             "supported_image_routes": entry.get("supported_image_routes"),
             "default_image_route": entry.get("default_image_route"),
@@ -2438,6 +2531,12 @@ def _build_search_candidate_model_meta_from_ref(
         "supports_batch": _model_ref_bool(model_ref.get("supports_batch"), True),
         "size_mode": size_mode,
         "supports_image_size": _model_ref_bool(model_ref.get("supports_image_size")),
+        "supports_custom_size": _model_ref_bool(model_ref.get("supports_custom_size")),
+        "size_constraints": (
+            dict(model_ref.get("size_constraints"))
+            if isinstance(model_ref.get("size_constraints"), dict)
+            else {}
+        ),
         "supports_resolution": _model_ref_bool(model_ref.get("supports_resolution")),
         "supported_image_routes": _model_ref_string_list(
             model_ref.get("supported_image_routes")
@@ -3538,18 +3637,24 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
             "OPENAI_API_FORCE_MODE": getattr(
                 request.app.state.config, "IMAGES_OPENAI_API_FORCE_MODE", False
             ),
-            "OPENAI_API_KEY": request.app.state.config.IMAGES_OPENAI_API_KEY,
+            "OPENAI_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_OPENAI_API_KEY
+            ),
         },
         "automatic1111": {
             "AUTOMATIC1111_BASE_URL": request.app.state.config.AUTOMATIC1111_BASE_URL,
-            "AUTOMATIC1111_API_AUTH": request.app.state.config.AUTOMATIC1111_API_AUTH,
+            "AUTOMATIC1111_API_AUTH": _secret_status(
+                request.app.state.config.AUTOMATIC1111_API_AUTH
+            ),
             "AUTOMATIC1111_CFG_SCALE": request.app.state.config.AUTOMATIC1111_CFG_SCALE,
             "AUTOMATIC1111_SAMPLER": request.app.state.config.AUTOMATIC1111_SAMPLER,
             "AUTOMATIC1111_SCHEDULER": request.app.state.config.AUTOMATIC1111_SCHEDULER,
         },
         "comfyui": {
             "COMFYUI_BASE_URL": request.app.state.config.COMFYUI_BASE_URL,
-            "COMFYUI_API_KEY": request.app.state.config.COMFYUI_API_KEY,
+            "COMFYUI_API_KEY": _secret_status(
+                request.app.state.config.COMFYUI_API_KEY
+            ),
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
         },
@@ -3558,11 +3663,15 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
             "GEMINI_API_FORCE_MODE": getattr(
                 request.app.state.config, "IMAGES_GEMINI_API_FORCE_MODE", False
             ),
-            "GEMINI_API_KEY": request.app.state.config.IMAGES_GEMINI_API_KEY,
+            "GEMINI_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_GEMINI_API_KEY
+            ),
         },
         "grok": {
             "GROK_API_BASE_URL": request.app.state.config.IMAGES_GROK_API_BASE_URL,
-            "GROK_API_KEY": request.app.state.config.IMAGES_GROK_API_KEY,
+            "GROK_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_GROK_API_KEY
+            ),
         },
     }
 
@@ -3772,18 +3881,24 @@ async def update_config(
             "OPENAI_API_FORCE_MODE": getattr(
                 request.app.state.config, "IMAGES_OPENAI_API_FORCE_MODE", False
             ),
-            "OPENAI_API_KEY": request.app.state.config.IMAGES_OPENAI_API_KEY,
+            "OPENAI_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_OPENAI_API_KEY
+            ),
         },
         "automatic1111": {
             "AUTOMATIC1111_BASE_URL": request.app.state.config.AUTOMATIC1111_BASE_URL,
-            "AUTOMATIC1111_API_AUTH": request.app.state.config.AUTOMATIC1111_API_AUTH,
+            "AUTOMATIC1111_API_AUTH": _secret_status(
+                request.app.state.config.AUTOMATIC1111_API_AUTH
+            ),
             "AUTOMATIC1111_CFG_SCALE": request.app.state.config.AUTOMATIC1111_CFG_SCALE,
             "AUTOMATIC1111_SAMPLER": request.app.state.config.AUTOMATIC1111_SAMPLER,
             "AUTOMATIC1111_SCHEDULER": request.app.state.config.AUTOMATIC1111_SCHEDULER,
         },
         "comfyui": {
             "COMFYUI_BASE_URL": request.app.state.config.COMFYUI_BASE_URL,
-            "COMFYUI_API_KEY": request.app.state.config.COMFYUI_API_KEY,
+            "COMFYUI_API_KEY": _secret_status(
+                request.app.state.config.COMFYUI_API_KEY
+            ),
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
         },
@@ -3792,11 +3907,15 @@ async def update_config(
             "GEMINI_API_FORCE_MODE": getattr(
                 request.app.state.config, "IMAGES_GEMINI_API_FORCE_MODE", False
             ),
-            "GEMINI_API_KEY": request.app.state.config.IMAGES_GEMINI_API_KEY,
+            "GEMINI_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_GEMINI_API_KEY
+            ),
         },
         "grok": {
             "GROK_API_BASE_URL": request.app.state.config.IMAGES_GROK_API_BASE_URL,
-            "GROK_API_KEY": request.app.state.config.IMAGES_GROK_API_KEY,
+            "GROK_API_KEY": _secret_status(
+                request.app.state.config.IMAGES_GROK_API_KEY
+            ),
         },
     }
 
@@ -3966,6 +4085,7 @@ async def get_models(
     credential_source: Optional[str] = None,
     connection_index: Optional[int] = None,
     search: Optional[str] = None,
+    model_id: Optional[str] = None,
     user=Depends(get_verified_user),
 ):
     if not _can_use_image_generation(request, user):
@@ -3974,10 +4094,15 @@ async def get_models(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    candidate_model_id = model_id or ""
+    if not candidate_model_id:
+        candidate_model_id = str(request.query_params.get("model") or "").strip()
+    _apply_image_model_owner_context(request, user, candidate_model_id)
+    discovery_user = getattr(request.state, "connection_user", None) or user
     try:
         models = await _discover_image_models(
             request,
-            user,
+            discovery_user,
             context=context,
             credential_source=credential_source,
             connection_index=connection_index,
@@ -3987,7 +4112,7 @@ async def get_models(
         if str(search or "").strip():
             search_candidates = await _discover_image_model_search_candidates(
                 request,
-                user,
+                discovery_user,
                 context=context,
                 credential_source=credential_source,
                 connection_index=connection_index,
@@ -4145,6 +4270,77 @@ def _normalize_exact_image_size(value: Optional[str]) -> Optional[str]:
     if not normalized or normalized == "auto":
         return None
     return normalized if re.match(r"^\d+x\d+$", normalized) else None
+
+
+def _parse_natural_image_size(prompt: Optional[str]) -> Optional[str]:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return None
+
+    # Accept both the ASCII x and the multiplication sign users commonly type.
+    unicode_size = re.search(
+        r"(?<!\d)(\d{2,5})\s*(?:x|\u00d7)\s*(\d{2,5})(?!\d)", text
+    )
+    if unicode_size:
+        return f"{int(unicode_size.group(1))}x{int(unicode_size.group(2))}"
+
+    named_size = re.search(
+        r"(?:\u5bbd|width)\s*[:\uFF1A]?\s*(\d{2,5}).*?(?:\u9ad8|height)\s*[:\uFF1A]?\s*(\d{2,5})",
+        text,
+    )
+    if named_size:
+        return f"{int(named_size.group(1))}x{int(named_size.group(2))}"
+
+    square_size = re.search(
+        r"(?:\u6b63\u65b9\u5f62|square)\s*(?:\u56fe\u7247|image)?\s*(\d{3,5})",
+        text,
+    )
+    if square_size:
+        side = int(square_size.group(1))
+        return f"{side}x{side}"
+
+    if re.search(r"16\s*[:\uFF1A]\s*9\s*(?:2k|2048)", text):
+        return "2048x1152"
+    if re.search(r"9\s*[:\uFF1A]\s*16\s*(?:2k|2048)", text):
+        return "1152x2048"
+
+    return None
+
+
+def _validate_gpt_image_2_size(size: Optional[str]) -> Optional[str]:
+    normalized = _normalize_exact_image_size(size)
+    if not normalized:
+        return None
+    try:
+        width, height = (int(value) for value in normalized.split("x", 1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="GPT Image 2 size must be WIDTHxHEIGHT.")
+
+    constraints = GPT_IMAGE_2_SIZE_CONSTRAINTS
+    ratio = max(width, height) / min(width, height) if min(width, height) else 0
+    pixels = width * height
+    if (
+        width < constraints["min_width"]
+        or height < constraints["min_height"]
+        or width > constraints["max_dimension"]
+        or height > constraints["max_dimension"]
+        or width % constraints["multiple_of"]
+        or height % constraints["multiple_of"]
+        or ratio > constraints["max_aspect_ratio"]
+        or pixels < constraints["min_pixels"]
+        or pixels > constraints["max_pixels"]
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_image_size",
+                "message": "GPT Image 2 size is outside the supported range.",
+                "size": normalized,
+                "constraints": constraints,
+            },
+        )
+
+    return normalized
 
 
 def _size_to_aspect_ratio(size: Optional[str]) -> Optional[str]:
@@ -6227,6 +6423,7 @@ async def _generate_via_openai_chat_image(
     image_urls: Optional[list[str]] = None,
     prefer_responses: bool = False,
     n: int = 1,
+    size: Optional[str] = None,
     partial_image_callback: Optional[
         Callable[[int, dict[str, Any]], Awaitable[None]]
     ] = None,
@@ -6259,6 +6456,7 @@ async def _generate_via_openai_chat_image(
                 image_urls=image_urls,
                 prefer_responses=prefer_responses,
                 n=1,
+                size=size,
             )
 
         return await _run_openai_image_split_batch(
@@ -6297,6 +6495,8 @@ async def _generate_via_openai_chat_image(
     if use_responses_api:
         request_url = _get_openai_responses_url(base_url)
         image_generation_tool: dict[str, Any] = {"type": "image_generation"}
+        if size:
+            image_generation_tool["size"] = size
         if stream_enabled:
             image_generation_tool["partial_images"] = 1
         payload: dict[str, Any] = {
@@ -6312,6 +6512,8 @@ async def _generate_via_openai_chat_image(
             "messages": [{"role": "user", "content": chat_content}],
             "stream": stream_enabled,
         }
+        if size:
+            payload["size"] = size
     upload_metadata: dict[str, Any] = {
         "model": upstream_model_id,
         "prompt": str(prompt or ""),
@@ -7064,6 +7266,7 @@ async def image_generations(
                 status_code=400,
                 detail=ERROR_MESSAGES.INCORRECT_FORMAT("  (e.g., auto or 1024x1024)."),
             )
+    natural_language_size = _parse_natural_image_size(form_data.prompt)
     requested_aspect_ratio = _normalize_gemini_aspect_ratio(form_data.aspect_ratio)
     requested_grok_aspect_ratio = _normalize_grok_aspect_ratio(form_data.aspect_ratio)
     requested_image_size = _normalize_gemini_image_size(form_data.image_size)
@@ -7103,6 +7306,8 @@ async def image_generations(
         if legacy_prefix_match:
             model_ref.setdefault("connection_id", legacy_prefix_match.group(1))
             selected_model = legacy_prefix_match.group(2).strip()
+
+    _apply_image_model_owner_context(request, user, selected_model_value, model_ref)
 
     selected_engine = _normalize_engine(
         getattr(request.app.state.config, "IMAGE_GENERATION_ENGINE", "")
@@ -7289,6 +7494,19 @@ async def image_generations(
                     "openai", model_ref, selected_model
                 )
 
+            if _is_gpt_image_2_model(
+                selected_model,
+                (selected_model_meta or {}).get("id"),
+                (selected_model_meta or {}).get("name"),
+            ):
+                if effective_size is None and all(
+                    getattr(form_data, field, None) is None
+                    for field in ("image_size", "aspect_ratio", "resolution")
+                ):
+                    effective_size = natural_language_size
+                effective_size = _validate_gpt_image_2_size(effective_size)
+                raster_size = effective_size or "512x512"
+
             generation_mode = (selected_model_meta or {}).get(
                 "generation_mode"
             ) or "openai_images"
@@ -7345,6 +7563,7 @@ async def image_generations(
                     model_id=selected_model,
                     prompt=form_data.prompt,
                     source=source,
+                    size=openai_request_size,
                     stream=form_data.stream,
                     image_url=reference_image_url,
                     image_urls=reference_image_urls,

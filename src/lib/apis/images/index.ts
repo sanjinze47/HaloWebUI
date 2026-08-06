@@ -50,6 +50,17 @@ export type ImageGenerationModel = {
 	supports_batch?: boolean;
 	size_mode?: 'exact' | 'aspect_ratio' | 'unsupported' | string;
 	supports_image_size?: boolean;
+	supports_custom_size?: boolean;
+	size_constraints?: {
+		min_width?: number;
+		min_height?: number;
+		max_dimension?: number;
+		max_aspect_ratio?: number;
+		min_pixels?: number;
+		max_pixels?: number;
+		multiple_of?: number;
+		presets?: string[];
+	};
 	supports_resolution?: boolean;
 	supported_image_routes?: string[];
 	default_image_route?: string | null;
@@ -246,6 +257,7 @@ export const getImageGenerationModels = async (
 		context?: 'settings' | 'runtime' | string;
 		credentialSource?: 'auto' | 'personal' | 'shared' | string;
 		connectionIndex?: number | null;
+		model_id?: string;
 		search?: string;
 	} = {}
 ): Promise<ImageGenerationModel[]> => {
@@ -260,6 +272,9 @@ export const getImageGenerationModels = async (
 	}
 	if (Number.isInteger(params.connectionIndex)) {
 		query.set('connection_index', `${params.connectionIndex}`);
+	}
+	if (params.model_id) {
+		query.set('model_id', params.model_id);
 	}
 	if (params.search?.trim()) {
 		query.set('search', params.search.trim());

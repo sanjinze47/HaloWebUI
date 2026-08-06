@@ -59,6 +59,7 @@ from open_webui.utils.error_handling import (
 )
 from open_webui.utils.openai_responses import (
     collect_responses_response,
+    collect_responses_response_from_text,
     convert_chat_completions_to_responses_payload,
     convert_responses_to_chat_completions,
     iter_responses_events,
@@ -894,6 +895,17 @@ async def _safe_read_upstream_body(response: aiohttp.ClientResponse):
             return await response.text()
         except Exception:
             return None
+
+
+def _looks_like_responses_event_stream(body: Any) -> bool:
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    if not isinstance(body, str):
+        return False
+    sample = body.lstrip()[:256].lower()
+    return sample.startswith("data:") or sample.startswith("event:") or (
+        sample.startswith("{") and "response.completed" in sample
+    )
 
 
 def _extract_upstream_error_detail(status: int, body) -> str:
@@ -2734,6 +2746,12 @@ async def health_check_connection(
                     ),
                 )
 
+            if use_responses_api and not isinstance(response_body, dict):
+                response_body = await collect_responses_response_from_text(
+                    response_body,
+                    content_type="text/event-stream",
+                )
+
             if not isinstance(response_body, dict):
                 raise HTTPException(
                     status_code=502,
@@ -3032,7 +3050,10 @@ async def generate_chat_completion(
     payload_dict = merge_additive_payload_fields(
         payload_dict,
         custom_params,
-        forbidden_keys=_CUSTOM_PARAM_FORBIDDEN_KEYS,
+        forbidden_keys=(
+            _CUSTOM_PARAM_FORBIDDEN_KEYS
+            | ({"max_output_tokens"} if use_responses_api and resolve_responses_compatibility(api_config)["omit_max_output_tokens"] else set())
+        ),
     )
     payload_dict = normalize_openai_compatible_reasoning_controls(
         payload_dict,
@@ -3420,10 +3441,20 @@ async def generate_chat_completion(
 
             # If the client asked for streaming but upstream returned non-stream JSON,
             # convert to a minimal ChatCompletions SSE (single-shot). This is NOT an endpoint fallback.
-            if not client_stream and looks_streaming:
-                response_data = await collect_responses_response(
-                    iter_responses_events(r.content.iter_any(), content_type=content_type)
+            if not client_stream:
+                raw_body = await r.read()
+                looks_streaming = looks_streaming or _looks_like_responses_event_stream(
+                    raw_body
                 )
+                if looks_streaming:
+                    response_data = await collect_responses_response_from_text(
+                        raw_body, content_type=content_type
+                    )
+                else:
+                    try:
+                        response_data = json.loads(raw_body.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                        response_data = None
                 if not isinstance(response_data, dict):
                     raise HTTPException(
                         status_code=502,

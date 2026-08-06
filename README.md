@@ -72,29 +72,48 @@ docker compose up -d
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
 
-### 版本与升级
+### GHCR 版本、升级与回滚
 
-默认 Compose 配置使用 GHCR 的 `latest` 镜像。升级时先拉取新镜像，再重建容器：
+默认 Compose 配置使用 `ghcr.io/sanjinze47/halowebui:latest`。`latest` 跟随 `main` 分支的成功构建；当前固定版本为 `0.2.0`，完整镜像标签为 `0.2.0`，轻量镜像标签为 `0.2.0-slim`。Compose 会始终挂载 `open-webui:/app/backend/data`，升级或回滚不会覆盖数据库和上传文件。
+
+升级到最新 `latest`：
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-生产环境可以固定到版本标签，避免自动获取未预期的更新：
+生产环境建议固定到 `0.2.0`，避免自动获取未预期的更新：
+
+```bash
+WEBUI_DOCKER_TAG=0.2.0 docker compose pull
+WEBUI_DOCKER_TAG=0.2.0 docker compose up -d
+```
+
+回滚时把 `WEBUI_DOCKER_TAG` 改为需要的历史版本（例如 `0.1.0`），再重新拉取并启动：
 
 ```bash
 WEBUI_DOCKER_TAG=0.1.0 docker compose pull
 WEBUI_DOCKER_TAG=0.1.0 docker compose up -d
 ```
 
-回滚时将 `WEBUI_DOCKER_TAG` 设置为上一个版本标签后重复上述命令。首次发布后，请在 GitHub 仓库的 **Packages** 设置中确认 `halowebui` 可见性为 **Public**，这样公开 GHCR 镜像无需登录；如果管理员将包设置为私有，先执行：
+使用 slim 镜像时，将 Compose 文件叠加为 `docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d`；main 构建使用 `slim`，固定版本通过版本号自动拼接为 `0.2.0-slim`：
 
 ```bash
-echo "$CR_PAT" | docker login ghcr.io -u sanjinze47 --password-stdin
+WEBUI_DOCKER_TAG=0.2.0 docker compose -f docker-compose.yaml -f docker-compose.slim.yaml pull
+WEBUI_DOCKER_TAG=0.2.0 docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d
 ```
 
-GitHub Actions 发布 GHCR 镜像使用仓库 Secret `GHCR_TOKEN`。该令牌只需要 `read:packages` 和 `write:packages` 权限，并应在到期前轮换；不要将令牌提交到仓库。
+GHCR 认证：
+
+- **公开镜像**：在 GitHub Packages 将 `halowebui` 设置为 **Public** 后，拉取 `latest`、`0.2.0` 或对应 slim 标签无需登录。
+- **私有镜像**：使用具有 `read:packages` 权限的个人访问令牌登录；不要把令牌写入仓库或 Compose 文件。
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+```
+
+GitHub Actions 发布镜像使用仓库 Secret `GHCR_TOKEN`，需要 `read:packages` 和 `write:packages` 权限，并应在到期前轮换。
 
 ### 首屏加载优化
 

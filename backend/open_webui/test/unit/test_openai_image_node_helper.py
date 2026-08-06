@@ -889,7 +889,7 @@ def test_generate_via_openai_images_endpoint_uses_configured_size(monkeypatch):
             model_id="gpt-image-2",
             prompt="生成一张图",
             n=1,
-            size="1024x1024",
+            size="2048x1152",
             background=None,
             source={
                 "base_url": "https://api.openai.com/v1",
@@ -900,7 +900,7 @@ def test_generate_via_openai_images_endpoint_uses_configured_size(monkeypatch):
     )
 
     assert captured["json_body"]["model"] == "gpt-image-2"
-    assert captured["json_body"]["size"] == "1024x1024"
+    assert captured["json_body"]["size"] == "2048x1152"
 
 
 def test_generate_via_openai_images_endpoint_retries_api_key_pool(monkeypatch):

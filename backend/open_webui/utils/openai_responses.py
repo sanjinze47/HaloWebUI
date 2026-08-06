@@ -48,20 +48,20 @@ def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[s
             config.get("responses_omit_max_output_tokens"), False
         )
         native_web_search_tool_type = ""
-        configured_tool_type = config.get("native_web_search_tool_type")
-        if isinstance(configured_tool_type, str) and configured_tool_type.strip():
-            native_web_search_tool_type = configured_tool_type.strip()
-        else:
-            legacy_tool_types = config.get("native_web_search_tool_types")
-            if isinstance(legacy_tool_types, list):
-                native_web_search_tool_type = next(
-                    (
-                        str(tool_type).strip()
-                        for tool_type in legacy_tool_types
-                        if tool_type and str(tool_type).strip()
-                    ),
-                    "",
-                )
+        legacy_tool_types = config.get("native_web_search_tool_types")
+        if isinstance(legacy_tool_types, list):
+            native_web_search_tool_type = next(
+                (
+                    str(tool_type).strip()
+                    for tool_type in legacy_tool_types
+                    if tool_type and str(tool_type).strip()
+                ),
+                "",
+            )
+        if not native_web_search_tool_type:
+            configured_tool_type = config.get("native_web_search_tool_type")
+            if isinstance(configured_tool_type, str) and configured_tool_type.strip():
+                native_web_search_tool_type = configured_tool_type.strip()
         if not native_web_search_tool_type:
             native_web_search_tool_type = "web_search_preview"
     else:

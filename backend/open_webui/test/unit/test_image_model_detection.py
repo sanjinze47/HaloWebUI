@@ -1,7 +1,6 @@
 import pathlib
 import sys
 
-
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
@@ -13,6 +12,8 @@ from open_webui.routers.images import (  # noqa: E402
     _extract_generated_images_from_openai_response,
     _should_parse_openai_image_response_as_stream,
     load_b64_image_data,
+    _parse_natural_image_size,
+    _validate_gpt_image_2_size,
 )
 
 
@@ -34,6 +35,70 @@ def test_openai_dedicated_image_model_keeps_generations_default_for_unannotated_
     assert classified["detection_method"] == "metadata"
     assert classified["supported_image_routes"] == ["generations", "chat", "edits"]
     assert classified["default_image_route"] == "generations"
+
+
+def test_gpt_image_2_exposes_safe_custom_size_contract_without_api_key():
+    classified = _classify_openai_image_model(
+        {"id": "gpt-image-2", "name": "GPT Image 2"},
+        base_url="https://relay.example/v1",
+        api_config={"api_key": "must-not-leak"},
+        source={"effective_source": "shared", "provider": "openai", "key": "secret"},
+    )
+
+    assert classified is not None
+    assert classified["supports_custom_size"] is True
+    assert "2048x1152" in classified["size_constraints"]["presets"]
+    assert "key" not in classified
+    assert "api_key" not in classified
+    assert "key" not in classified["model_ref"]
+
+
+def test_gpt_image_2_accepts_unicode_safe_natural_language_size_forms():
+    assert _parse_natural_image_size("2048x1152") == "2048x1152"
+    assert _parse_natural_image_size("\u5bbd 2048 \u9ad8 1152") == "2048x1152"
+    assert _parse_natural_image_size("16:9 2K") == "2048x1152"
+    assert _parse_natural_image_size("\u6b63\u65b9\u5f62 2048") == "2048x2048"
+
+
+def test_gpt_image_2_size_validation_rejects_invalid_dimensions():
+    assert _validate_gpt_image_2_size("2048x1152") == "2048x1152"
+    assert _validate_gpt_image_2_size("3840x2160") == "3840x2160"
+    for value in ("1000x1000", "4096x2160", "16x16", "3840x1024"):
+        try:
+            _validate_gpt_image_2_size(value)
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 400
+        else:
+            raise AssertionError(f"expected 400 for {value}")
+
+
+def test_shared_model_selection_id_keeps_credentials_server_side(monkeypatch):
+    owner = type("Owner", (), {"id": "owner-1", "role": "admin"})()
+    viewer = type("Viewer", (), {"id": "viewer-1", "role": "user"})()
+    request = type("Request", (), {"state": type("State", (), {})()})()
+    model = type("Model", (), {"user_id": owner.id, "base_model_id": None})()
+
+    monkeypatch.setattr(
+        "open_webui.routers.images.Models.get_model_by_id",
+        lambda _model_id: model,
+    )
+    monkeypatch.setattr(
+        "open_webui.routers.images.Users.get_user_by_id",
+        lambda _user_id: owner,
+    )
+    monkeypatch.setattr(
+        "open_webui.utils.user_connections.maybe_migrate_user_connections",
+        lambda _request, user: user,
+    )
+
+    # The helper must select the owner's connection context without copying any
+    # credential into a response object.
+    from open_webui.routers import images as images_router
+
+    images_router._apply_image_model_owner_context(
+        request, viewer, "shared-model", {"owner_id": owner.id}
+    )
+    assert request.state.connection_user is owner
 
 
 def test_openai_output_image_chat_model_uses_chat_image_mode_for_relays():

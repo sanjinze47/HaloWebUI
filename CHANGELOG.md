@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-06
+
+### Highlights
+
+- **图片尺寸兼容**: 扩展图片模型的自然语言尺寸解析与校验，兼容常用比例和分辨率。
+- **共享图片模型接口模式修复**: 修正共享图片模型的连接上下文与接口路由选择，凭据继续保留在服务端。
+- **文件上传模式改进**: 改进原生文件输入与文件处理模式，并完善不支持场景下的回退行为。
+- **Sub2API Responses 兼容**: 增加 Sub2API Responses 图片模型响应和流式响应的兼容处理。
+- **代码块复制修复**: 修复复制代码块时空白、缩进和换行被破坏的问题。
+
 ## [0.1.0] - 2026-08-06
 
 ### Highlights

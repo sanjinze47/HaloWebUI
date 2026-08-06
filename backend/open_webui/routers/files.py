@@ -247,7 +247,7 @@ def _validate_uploaded_file(
     allowed_extensions = _normalize_allowed_values(
         getattr(config, "ALLOWED_FILE_EXTENSIONS", None), strip_dot=True
     )
-    if process and allowed_extensions and extension not in allowed_extensions:
+    if allowed_extensions and extension not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={

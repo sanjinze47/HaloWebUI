@@ -334,7 +334,8 @@
 		builtinLoading = true;
 		try {
 			const runtimeModels = await getImageGenerationModels(localStorage.token, {
-				context: 'runtime'
+				context: 'runtime',
+				model_id: currentModelIdentity
 			}).catch(() => []);
 			const preferredId = currentModelIdentity;
 			const currentModelRef = getModelRef(currentModel as any);
@@ -709,6 +710,15 @@
 		value: option.value,
 		label: `${option.label} · ${option.pixels}`
 	}));
+	$: gptImage2SizeOptions = (builtinModelMeta?.size_constraints?.presets ?? []).map((value) => ({
+		value,
+		label: value
+	}));
+	$: hasCustomExactSizeOption =
+		hasBuiltinImage &&
+		builtinEngine === 'openai' &&
+		Boolean(builtinModelMeta?.supports_custom_size) &&
+		openAIRouteUsesExactSize;
 	$: resolutionOptions = GROK_IMAGE_RESOLUTION_OPTIONS.map((option) => ({
 		value: option.value,
 		label: option.label
@@ -755,6 +765,13 @@
 	$: currentQualityLabel = hasBuiltinResolutionOption
 		? findOptionLabel(resolutionOptions, currentQuality)
 		: findOptionLabel(builtinImageSizeOptions, currentQuality);
+
+	const handleCustomExactSize = (event: Event) => {
+		const target = event.currentTarget;
+		if (target instanceof HTMLInputElement) {
+			setOption({ size: target.value.trim() || null, aspect_ratio: null });
+		}
+	};
 	$: modelSummary = (() => {
 		if (loading) return tr('正在读取当前图片模型能力...', 'Loading image model capabilities...');
 		if (hasBuiltinImage) {
@@ -902,6 +919,40 @@
 							</button>
 						{/each}
 					</div>
+					{#if hasCustomExactSizeOption}
+						<div class="mt-2 space-y-1.5">
+							<div class="text-xs font-medium text-gray-600 dark:text-gray-300">
+								{tr('GPT Image 2 尺寸', 'GPT Image 2 size')}
+							</div>
+							<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+								{#each gptImage2SizeOptions as option}
+									<button
+										type="button"
+										class="rounded-lg border px-2 py-1.5 text-xs font-medium transition
+											{imageGenerationOptions?.size === option.value
+											? 'border-teal-400 bg-teal-50 text-teal-700 dark:border-teal-400/60 dark:bg-teal-500/15 dark:text-teal-100'
+											: 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-200'}"
+										on:click={() => setOption({ size: option.value, aspect_ratio: null })}
+									>
+										{option.label}
+									</button>
+								{/each}
+							</div>
+							<input
+								class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-900 outline-none focus:border-teal-400 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100"
+								value={imageGenerationOptions?.size ?? ''}
+								placeholder="2048x1152"
+								aria-label={tr('自定义图片尺寸', 'Custom image size')}
+								on:input={handleCustomExactSize}
+							/>
+							<div class="text-[11px] text-gray-400 dark:text-gray-500">
+								{tr(
+									'宽高必须是 16 的倍数，最大边 3840。',
+									'Width and height must be multiples of 16; max edge is 3840.'
+								)}
+							</div>
+						</div>
+					{/if}
 				</section>
 
 				<section class="space-y-2">

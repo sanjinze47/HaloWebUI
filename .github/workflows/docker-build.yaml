@@ -31,6 +31,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -84,6 +85,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read application version
+        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+
+      - name: Normalize manual version tag
+        if: inputs.version_tag != ''
+        shell: bash
+        run: echo "IMAGE_VERSION_TAG=${INPUT_VERSION_TAG#v}" >> "$GITHUB_ENV"
+        env:
+          INPUT_VERSION_TAG: ${{ inputs.version_tag }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -105,7 +121,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
+            type=raw,value=${{ env.IMAGE_VERSION_TAG }},enable=${{ inputs.version_tag != '' }}
           flavor: |
             latest=${{ github.ref == 'refs/heads/main' }}
 
@@ -122,7 +138,8 @@ jobs:
           cache-from: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-main-${{ env.PLATFORM_PAIR }}
           cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-main-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
-            BUILD_HASH=${{ github.sha }}
+            WEBUI_VERSION=${{ env.WEBUI_VERSION }}
+            WEBUI_BUILD_HASH=${{ github.sha }}
             HALO_RUNTIME_PROFILE=main
 
       - name: Export digest
@@ -156,6 +173,24 @@ jobs:
         env:
           IMAGE_NAME: '${{ github.repository }}'
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read application version
+        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+
+      - name: Normalize manual version tag
+        if: inputs.version_tag != ''
+        shell: bash
+        run: echo "IMAGE_VERSION_TAG=${INPUT_VERSION_TAG#v}" >> "$GITHUB_ENV"
+        env:
+          INPUT_VERSION_TAG: ${{ inputs.version_tag }}
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -184,7 +219,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
+            type=raw,value=${{ env.IMAGE_VERSION_TAG }},enable=${{ inputs.version_tag != '' }}
           flavor: |
             latest=${{ github.ref == 'refs/heads/main' }}
 
@@ -228,6 +263,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read application version
+        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+
+      - name: Normalize manual version tag
+        if: inputs.version_tag != ''
+        shell: bash
+        run: echo "IMAGE_VERSION_TAG=${INPUT_VERSION_TAG#v}" >> "$GITHUB_ENV"
+        env:
+          INPUT_VERSION_TAG: ${{ inputs.version_tag }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -248,7 +298,7 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=semver,pattern={{major}}.{{minor}}-slim
-            type=raw,value=${{ inputs.version_tag }}-slim,enable=${{ inputs.version_tag != '' }}
+            type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Build Docker image (slim)
         uses: docker/build-push-action@v6
@@ -263,7 +313,8 @@ jobs:
           cache-from: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-slim-${{ env.PLATFORM_PAIR }}
           cache-to: type=registry,ref=${{ env.FULL_IMAGE_NAME }}:cache-slim-${{ env.PLATFORM_PAIR }},mode=max
           build-args: |
-            BUILD_HASH=${{ github.sha }}
+            WEBUI_VERSION=${{ env.WEBUI_VERSION }}
+            WEBUI_BUILD_HASH=${{ github.sha }}
             HALO_RUNTIME_PROFILE=slim
 
       - name: Export digest
@@ -295,6 +346,24 @@ jobs:
         env:
           IMAGE_NAME: '${{ github.repository }}'
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read application version
+        run: echo "WEBUI_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
+
+      - name: Normalize manual version tag
+        if: inputs.version_tag != ''
+        shell: bash
+        run: echo "IMAGE_VERSION_TAG=${INPUT_VERSION_TAG#v}" >> "$GITHUB_ENV"
+        env:
+          INPUT_VERSION_TAG: ${{ inputs.version_tag }}
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -322,7 +391,7 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=semver,pattern={{major}}.{{minor}}-slim
-            type=raw,value=${{ inputs.version_tag }}-slim,enable=${{ inputs.version_tag != '' }}
+            type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests

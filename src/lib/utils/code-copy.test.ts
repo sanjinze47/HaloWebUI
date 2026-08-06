@@ -8,7 +8,8 @@ import {
 
 describe('code block copy', () => {
 	it('preserves multi-level Python indentation', () => {
-		const code = 'def outer():\n    if ready:\n        for item in items:\n            print(item)\n    return None';
+		const code =
+			'def outer():\n    if ready:\n        for item in items:\n            print(item)\n    return None';
 
 		expect(preserveCodeBlockText(code)).toBe(code);
 	});

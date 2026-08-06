@@ -175,8 +175,9 @@
 	};
 
 	const copyCode = async () => {
+		const copiedSuccessfully = await copyToClipboard(preserveCodeBlockText(_code));
+		if (!copiedSuccessfully) return;
 		copied = true;
-		await copyToClipboard(preserveCodeBlockText(_code));
 
 		setTimeout(() => {
 			copied = false;

@@ -42,6 +42,7 @@
 	const dispatch = createEventDispatcher();
 
 	type ImageGenerationOptions = {
+		size?: string | null;
 		image_size?: string | null;
 		aspect_ratio?: string | null;
 		resolution?: string | null;
@@ -130,7 +131,9 @@
 		}
 		const connectionIndex = cleanValue(modelRef.connection_index);
 		if (connectionIndex) {
-			return cleanValue(candidateRef?.connection_index ?? model.connection_index) === connectionIndex;
+			return (
+				cleanValue(candidateRef?.connection_index ?? model.connection_index) === connectionIndex
+			);
 		}
 		return true;
 	};
@@ -158,7 +161,8 @@
 		builtinLoading = true;
 		try {
 			const runtimeModels = await getImageGenerationModels(localStorage.token, {
-				context: 'runtime'
+				context: 'runtime',
+				model_id: currentModelIdentity
 			}).catch(() => []);
 			const preferredId = currentModelIdentity;
 			const currentModelRef = getModelRef(currentModel as any);
@@ -301,8 +305,12 @@
 	$: openaiRouteOptions = getOpenAIImageRouteOptions(builtinModelMeta, tr);
 	const getAutoOpenAIRouteValue = (options: Array<{ value: string }>) => {
 		if (hasReferenceImage) {
-			const referenceDefaultRoute = `${builtinModelMeta?.reference_image_default_route ?? ''}`.trim();
-			if (referenceDefaultRoute && options.some((option) => option.value === referenceDefaultRoute)) {
+			const referenceDefaultRoute =
+				`${builtinModelMeta?.reference_image_default_route ?? ''}`.trim();
+			if (
+				referenceDefaultRoute &&
+				options.some((option) => option.value === referenceDefaultRoute)
+			) {
 				return referenceDefaultRoute;
 			}
 			for (const route of ['chat', 'responses', 'edits']) {
@@ -356,8 +364,18 @@
 		value: option.value,
 		label: `${option.label} · ${option.pixels}`
 	}));
+	$: gptImage2SizeOptions = (builtinModelMeta?.size_constraints?.presets ?? []).map((value) => ({
+		value,
+		label: value
+	}));
+	$: hasCustomExactSizeOption =
+		hasBuiltinImage &&
+		builtinEngine === 'openai' &&
+		Boolean(builtinModelMeta?.supports_custom_size);
 	$: aspectRatioOptions = (
-		builtinModelMeta?.supports_resolution ? GROK_IMAGE_ASPECT_RATIO_OPTIONS : IMAGE_ASPECT_RATIO_OPTIONS
+		builtinModelMeta?.supports_resolution
+			? GROK_IMAGE_ASPECT_RATIO_OPTIONS
+			: IMAGE_ASPECT_RATIO_OPTIONS
 	).map((option) => ({ value: option.value, label: option.label }));
 	$: resolutionOptions = GROK_IMAGE_RESOLUTION_OPTIONS.map((option) => ({
 		value: option.value,
@@ -387,10 +405,10 @@
 	$: hasOpenAIRouteChoice =
 		hasBuiltinImage && builtinEngine === 'openai' && openaiRouteOptions.length > 0;
 	$: hasBuiltinSizeOption =
-		hasBuiltinImage && (builtinEngine === 'gemini' || builtinEngine === 'grok') &&
+		hasBuiltinImage &&
+		(builtinEngine === 'gemini' || builtinEngine === 'grok') &&
 		Boolean(builtinModelMeta?.supports_image_size);
-	$: hasBuiltinResolutionOption =
-		hasBuiltinImage && Boolean(builtinModelMeta?.supports_resolution);
+	$: hasBuiltinResolutionOption = hasBuiltinImage && Boolean(builtinModelMeta?.supports_resolution);
 	$: hasBuiltinAspectOption =
 		hasBuiltinImage &&
 		(builtinModelMeta?.size_mode === 'aspect_ratio' || builtinModelMeta?.supports_image_size);
@@ -400,6 +418,7 @@
 		hasBuiltinSizeOption ||
 		hasBuiltinResolutionOption ||
 		hasBuiltinAspectOption ||
+		hasCustomExactSizeOption ||
 		(hasCustomImage &&
 			(getImageValveProperty(customValvesSpec, 'image_size') ||
 				getImageValveProperty(customValvesSpec, 'aspect_ratio') ||
@@ -413,7 +432,9 @@
 		if (value == null) {
 			return fallback ?? options[0]?.label ?? '';
 		}
-		return options.find((option) => `${option.value}` === `${value}`)?.label ?? fallback ?? `${value}`;
+		return (
+			options.find((option) => `${option.value}` === `${value}`)?.label ?? fallback ?? `${value}`
+		);
 	};
 
 	$: triggerSummary = (() => {
@@ -434,7 +455,11 @@
 		}
 		if (hasBuiltinImage) {
 			if (builtinEngine === 'openai') {
-				return findOptionLabel(openaiRouteOptions, openaiRouteSelectedValue, tr('普通生图', 'Default'));
+				return findOptionLabel(
+					openaiRouteOptions,
+					openaiRouteSelectedValue,
+					tr('普通生图', 'Default')
+				);
 			}
 			const parts: string[] = [];
 			if (hasBuiltinSizeOption && imageGenerationOptions?.image_size) {
@@ -517,9 +542,15 @@
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
 						>
 							<div class="truncate">{tr('接口模式', 'Route Mode')}</div>
-							<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+							<div
+								class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+							>
 								<span class="truncate max-w-[7rem]">
-									{findOptionLabel(openaiRouteOptions, openaiRouteSelectedValue, tr('普通生图', 'Default'))}
+									{findOptionLabel(
+										openaiRouteOptions,
+										openaiRouteSelectedValue,
+										tr('普通生图', 'Default')
+									)}
 								</span>
 								<ChevronRight class="size-3" strokeWidth={2} />
 							</div>
@@ -567,7 +598,9 @@
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
 						>
 							<div class="truncate">{tr('图片尺寸', 'Image Size')}</div>
-							<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+							<div
+								class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+							>
 								<span class="truncate max-w-[8rem]">
 									{findOptionLabel(builtinImageSizeOptions, currentValue)}
 								</span>
@@ -600,6 +633,43 @@
 					</DropdownMenu.Sub>
 				{/if}
 
+				{#if hasCustomExactSizeOption}
+					<DropdownMenu.Sub>
+						<DropdownMenu.SubTrigger
+							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+						>
+							<div class="truncate">{tr('自定义图片尺寸', 'Custom Image Size')}</div>
+							<div
+								class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+							>
+								<span class="truncate max-w-[8rem]">{imageGenerationOptions?.size ?? 'auto'}</span>
+								<ChevronRight class="size-3" strokeWidth={2} />
+							</div>
+						</DropdownMenu.SubTrigger>
+						<DropdownMenu.SubContent
+							class="w-full min-w-[220px] rounded-xl px-1 py-1 border border-gray-300/30 dark:border-gray-700/50 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
+							sideOffset={8}
+							transition={flyAndScale}
+						>
+							{#each gptImage2SizeOptions as option}
+								<DropdownMenu.Item
+									class="flex w-full justify-between gap-3 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
+									on:click={() => {
+										imageGenerationOptions = {
+											...imageGenerationOptions,
+											size: option.value,
+											aspect_ratio: null
+										};
+										closeMenu();
+									}}
+								>
+									<div class="truncate">{option.label}</div>
+								</DropdownMenu.Item>
+							{/each}
+						</DropdownMenu.SubContent>
+					</DropdownMenu.Sub>
+				{/if}
+
 				{#if hasBuiltinResolutionOption}
 					{@const currentValue = `${imageGenerationOptions?.resolution ?? resolutionOptions[0]?.value ?? '1k'}`}
 					<DropdownMenu.Sub>
@@ -607,7 +677,9 @@
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
 						>
 							<div class="truncate">{tr('清晰度', 'Resolution')}</div>
-							<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+							<div
+								class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+							>
 								<span class="truncate max-w-[7rem]">
 									{findOptionLabel(resolutionOptions, currentValue)}
 								</span>
@@ -647,7 +719,9 @@
 							class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"
 						>
 							<div class="truncate">{tr('图片比例', 'Aspect Ratio')}</div>
-							<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+							<div
+								class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+							>
 								<span class="truncate max-w-[6rem]">
 									{findOptionLabel(aspectRatioOptions, currentValue)}
 								</span>
@@ -691,7 +765,9 @@
 								<div class="truncate">
 									{property?.title ?? tr('图片尺寸', 'Image Size')}
 								</div>
-								<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+								<div
+									class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+								>
 									<span class="truncate max-w-[7rem]">
 										{findOptionLabel(customImageSizeOptions, currentValue)}
 									</span>
@@ -731,7 +807,9 @@
 								<div class="truncate">
 									{property?.title ?? tr('图片比例', 'Aspect Ratio')}
 								</div>
-								<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+								<div
+									class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+								>
 									<span class="truncate max-w-[6rem]">
 										{findOptionLabel(customAspectRatioOptions, currentValue)}
 									</span>
@@ -771,7 +849,9 @@
 								<div class="truncate">
 									{property?.title ?? tr('清晰度', 'Resolution')}
 								</div>
-								<div class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+								<div
+									class="shrink-0 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+								>
 									<span class="truncate max-w-[6rem]">
 										{findOptionLabel(customResolutionOptions, currentValue)}
 									</span>

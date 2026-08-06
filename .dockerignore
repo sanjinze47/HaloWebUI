@@ -1,4 +1,5 @@
 .git
+.worktrees
 .github
 .DS_Store
 docs

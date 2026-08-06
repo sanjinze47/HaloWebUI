@@ -19,7 +19,8 @@ ARG HALO_PG_CLIENT_MAJORS="14 15 16 17 18"
 # Tiktoken encoding name; models to use can be found at https://huggingface.co/models?library=tiktoken
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
-ARG BUILD_HASH=unknown
+ARG WEBUI_VERSION=0.0.0
+ARG WEBUI_BUILD_HASH=unknown
 ARG HALO_RUNTIME_PROFILE=main
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
@@ -27,7 +28,8 @@ ARG GID=0
 
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS frontend-build
-ARG BUILD_HASH
+ARG WEBUI_VERSION
+ARG WEBUI_BUILD_HASH
 ARG ENABLE_PYODIDE=false
 ARG VITE_SOURCEMAP=false
 
@@ -46,8 +48,9 @@ COPY tailwind.config.js ./
 COPY tsconfig.json ./
 COPY vite.config.ts ./
 
-ENV WEBUI_BUILD_HASH=${BUILD_HASH} \
-	APP_BUILD_HASH=${BUILD_HASH} \
+ENV WEBUI_VERSION=${WEBUI_VERSION} \
+	WEBUI_BUILD_HASH=${WEBUI_BUILD_HASH} \
+	APP_BUILD_HASH=${WEBUI_BUILD_HASH} \
 	ENABLE_PYODIDE=${ENABLE_PYODIDE} \
     VITE_SOURCEMAP=${VITE_SOURCEMAP}
 
@@ -68,8 +71,12 @@ ARG HALO_PG_CLIENT_MAJORS
 ARG UID
 ARG GID
 ARG HALO_RUNTIME_PROFILE
+ARG WEBUI_VERSION
+ARG WEBUI_BUILD_HASH
 
 ENV ENV=prod \
+    WEBUI_VERSION=${WEBUI_VERSION} \
+    WEBUI_BUILD_HASH=${WEBUI_BUILD_HASH} \
     PORT=8080 \
     USE_OLLAMA_DOCKER=${USE_OLLAMA} \
     INSTALL_PROFILE=${INSTALL_PROFILE} \
@@ -192,10 +199,8 @@ HEALTHCHECK CMD python -c "import json, os, urllib.request; response = urllib.re
 
 USER $UID:$GID
 
-ARG BUILD_HASH
-ENV WEBUI_BUILD_HASH=${BUILD_HASH}
 # Keep the old variable for integrations that read the legacy name.
-ENV WEBUI_BUILD_VERSION=${BUILD_HASH}
+ENV WEBUI_BUILD_VERSION=${WEBUI_BUILD_HASH}
 ENV DOCKER=true
 
 CMD ["bash", "start.sh"]

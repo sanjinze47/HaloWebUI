@@ -63,6 +63,7 @@ from open_webui.routers.openai import (
     _clear_cached_openai_file_id,
     _get_cached_openai_file_id,
     _get_native_file_input_capability,
+    _is_official_openai_connection,
     _get_openai_file_cache_key,
     _get_openai_user_config,
     _probe_responses_support_for_native_file_inputs,
@@ -100,6 +101,8 @@ from open_webui.retrieval.document_processing import (
     get_requested_processing_mode_for_file_item,
     normalize_document_provider,
     normalize_file_processing_mode,
+    normalize_file_failure_strategy,
+    resolve_chat_file_processing_mode,
 )
 from open_webui.storage.provider import Storage
 
@@ -444,11 +447,23 @@ def _get_file_item_size(file_item: Any) -> Optional[int]:
         return None
     nested_file = _get_file_item_nested_file(file_item)
     meta = _get_file_item_meta(file_item, nested_file)
-    for value in (file_item.get("size"), nested_file.get("size"), meta.get("size")):
+    file_id = _get_attachment_file_id(file_item)
+    file_obj = Files.get_file_by_id(file_id) if file_id else None
+    file_meta = getattr(file_obj, "meta", None) or {}
+    file_data = getattr(file_obj, "data", None) or {}
+    for value in (
+        file_item.get("size"),
+        nested_file.get("size"),
+        meta.get("size"),
+        file_meta.get("size") if isinstance(file_meta, dict) else None,
+        file_data.get("size") if isinstance(file_data, dict) else None,
+    ):
         try:
             if value is not None and str(value).strip() != "":
-                return int(value)
-        except Exception:
+                size = int(value)
+                if size >= 0:
+                    return size
+        except (TypeError, ValueError):
             continue
     return None
 
@@ -2538,6 +2553,189 @@ def _get_file_item_processing_mode(file_item: Any) -> str:
     )
 
 
+def _coerce_file_size_limit(value: Any) -> Optional[int]:
+    """Normalize a persisted upload limit, whose numeric values are MB."""
+    if value is None or isinstance(value, bool):
+        return None
+    value = getattr(value, "value", value)
+    match = re.fullmatch(
+        r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I
+    )
+    if not match:
+        return None
+    try:
+        number = float(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    unit = (match.group(2) or "mb").lower()
+    multipliers = {
+        "kb": 1024,
+        "kib": 1024,
+        "mb": 1024 * 1024,
+        "mib": 1024 * 1024,
+        "gb": 1024 * 1024 * 1024,
+        "gib": 1024 * 1024 * 1024,
+    }
+    limit = int(number * multipliers.get(unit, 1024 * 1024))
+    return limit if limit > 0 else None
+
+
+def _coerce_file_count_limit(value: Any) -> Optional[int]:
+    value = getattr(value, "value", value)
+    if value is None or isinstance(value, bool) or str(value).strip() == "":
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count > 0 else None
+
+
+def _validate_chat_file_limits(request: Request, files: Any) -> None:
+    """Reject oversized chat attachments before any provider upload or parsing."""
+    if not isinstance(files, list):
+        return
+
+    limit = _coerce_file_size_limit(
+        getattr(request.app.state.config, "FILE_MAX_TOTAL_SIZE", None)
+    )
+    if limit is None:
+        limit = _coerce_file_size_limit(os.environ.get("RAG_FILE_MAX_TOTAL_SIZE"))
+    count_limit = _coerce_file_count_limit(
+        getattr(request.app.state.config, "FILE_MAX_COUNT", None)
+    )
+    if count_limit is None:
+        count_limit = _coerce_file_count_limit(os.environ.get("RAG_FILE_MAX_COUNT"))
+
+    if limit is None and count_limit is None:
+        return
+
+    seen: set[str] = set()
+    attachment_count = 0
+    total_size = 0
+    for file_item in files:
+        if not isinstance(file_item, dict) or file_item.get("source") == "knowledge":
+            continue
+        if file_item.get("type") not in (None, "file"):
+            continue
+        file_id = _get_attachment_file_id(file_item)
+        if file_id and file_id in seen:
+            continue
+        if file_id:
+            seen.add(file_id)
+        attachment_count += 1
+        if count_limit is not None and attachment_count > count_limit:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "chat_file_count_exceeded",
+                    "message": "The number of chat attachments exceeds the configured limit.",
+                    "count": attachment_count,
+                    "limit": count_limit,
+                },
+            )
+
+        size = _get_file_item_size(file_item)
+        if size is None:
+            if limit is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "chat_file_size_unknown",
+                        "message": "The size of a chat attachment could not be determined.",
+                        "file_id": file_id or None,
+                    },
+                )
+            continue
+        total_size += size
+
+    if limit is not None and total_size > limit:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "chat_files_too_large",
+                "message": "The total size of chat attachments exceeds the configured limit.",
+                "size": total_size,
+                "limit": limit,
+            },
+        )
+
+
+def _resolve_auto_chat_file_modes(
+    request: Request, metadata: dict, user: UserModel, model: dict
+) -> None:
+    """Resolve auto attachment modes after the final model and connection are known."""
+    files = metadata.get("files") or []
+    if not isinstance(files, list):
+        return
+
+    default_mode = normalize_file_processing_mode(
+        getattr(request.app.state.config, "FILE_PROCESSING_DEFAULT_MODE", None),
+        FILE_PROCESSING_MODE_RETRIEVAL,
+    )
+    official_openai = False
+    connection_url = ""
+    api_config: dict[str, Any] = {}
+    if (model or {}).get("owned_by") == "openai" or isinstance(
+        (model or {}).get("openai"), dict
+    ):
+        connection_user = (
+            getattr(getattr(request, "state", None), "connection_user", None) or user
+        )
+        base_urls, keys, cfgs = _get_openai_user_config(connection_user)
+        if base_urls:
+            _url_idx, connection_url, _key, api_config = (
+                _resolve_openai_connection_by_model_id(
+                    str(
+                        (model or {}).get("id")
+                        or metadata.get("model", {}).get("id")
+                        or ""
+                    ),
+                    base_urls,
+                    keys,
+                    cfgs,
+                    model_ref=get_model_ref_from_model(model),
+                    request_models=getattr(
+                        getattr(request, "state", None), "MODELS", None
+                    ),
+                )
+            )
+            official_openai = _is_official_openai_connection(connection_url)
+
+    auto_native_ids: list[str] = []
+    for file_item in files:
+        if not isinstance(file_item, dict) or file_item.get("type") != "file":
+            continue
+        if file_item.get("source") == "knowledge":
+            continue
+        requested_mode = get_requested_processing_mode_for_file_item(
+            file_item,
+            file_obj=Files.get_file_by_id(_get_attachment_file_id(file_item)),
+            default_mode=default_mode,
+        )
+        if requested_mode != "auto":
+            continue
+
+        resolved_mode = resolve_chat_file_processing_mode(
+            requested_mode,
+            official_openai=official_openai,
+            fallback=default_mode,
+        )
+        file_item["processing_mode"] = resolved_mode
+        file_item["processing_mode_source"] = "auto"
+        if resolved_mode == FILE_PROCESSING_MODE_NATIVE_FILE:
+            file_id = _get_attachment_file_id(file_item)
+            if file_id:
+                auto_native_ids.append(file_id)
+
+    metadata["auto_native_file_input_ids"] = auto_native_ids
+    metadata["native_file_input_failure_strategy"] = normalize_file_failure_strategy(
+        api_config.get("file_failure_strategy") if isinstance(api_config, dict) else None,
+        "strict" if official_openai else "compat",
+    )
+    metadata["native_file_input_connection_url"] = connection_url
+
+
 def _is_native_file_input_candidate(file_item: Any) -> bool:
     if not isinstance(file_item, dict):
         return False
@@ -2941,6 +3139,28 @@ async def _ensure_requested_chat_file_modes(
                     message=("Native file inputs were not prepared for this request."),
                     source="chat_preparation",
                 )
+                auto_native = file_id in {
+                    str(value).strip()
+                    for value in (metadata.get("auto_native_file_input_ids") or [])
+                    if str(value).strip()
+                }
+                failure_strategy = normalize_file_failure_strategy(
+                    metadata.get("native_file_input_failure_strategy"),
+                    "compat" if auto_native else "strict",
+                )
+                if not auto_native or failure_strategy == "strict":
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "code": "native_file_input_failed",
+                            "message": str(
+                                native_fallback_diagnostic.get("message")
+                                or "Native file input could not be prepared."
+                            ),
+                            "reason": native_fallback_diagnostic.get("reason"),
+                            "file_id": file_id,
+                        },
+                    )
                 desired_mode = FILE_PROCESSING_MODE_FULL_CONTEXT
                 file_item["processing_mode"] = FILE_PROCESSING_MODE_FULL_CONTEXT
                 file_item["context"] = "full"
@@ -4970,6 +5190,19 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
             form_data=form_data,
             extra_params=extra_params,
         )
+
+        filtered_model_id = str(form_data.get("model") or "").strip()
+        if filtered_model_id and filtered_model_id != str(model.get("id") or "").strip():
+            resolved_model = resolve_model_from_lookup(
+                models,
+                getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
+                filtered_model_id,
+            )
+            if resolved_model is not None:
+                model = resolved_model
+                metadata["model"] = model
+                extra_params["__model__"] = model
+                log.debug("Updated chat model after inlet filters: %s", filtered_model_id)
     except Exception as e:
         raise Exception(f"Error: {e}")
 
@@ -5248,6 +5481,8 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
 
     form_data["metadata"] = metadata
 
+    _validate_chat_file_limits(request, metadata.get("files"))
+
     # J-7-16: Separate knowledge files from regular attachments so that
     # native tool calls only see user-uploaded files, while RAG still
     # processes everything (knowledge + uploads).
@@ -5257,19 +5492,65 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
         metadata["files"] = [f for f in all_files if f.get("source") != "knowledge"]
         metadata["knowledge_files"] = knowledge_files
 
+    _resolve_auto_chat_file_modes(request, metadata, user, model)
+
     try:
         await _prepare_openai_native_file_inputs(
             request, form_data, metadata, user, model
         )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
+        if normalize_file_failure_strategy(
+            metadata.get("native_file_input_failure_strategy"), "compat"
+        ) == "strict" and any(
+            get_requested_processing_mode_for_file_item(
+                item,
+                file_obj=None,
+                default_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+            )
+            == FILE_PROCESSING_MODE_NATIVE_FILE
+            for item in (metadata.get("files") or [])
+            if isinstance(item, dict)
+        ):
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "native_file_input_failed",
+                    "message": "Native file input preparation failed.",
+                    "reason": str(e),
+                },
+            ) from e
 
     try:
         await _ensure_requested_chat_file_modes(
             request, metadata, user, model, event_emitter
         )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
+        if normalize_file_failure_strategy(
+            metadata.get("native_file_input_failure_strategy"), "compat"
+        ) == "strict" and any(
+            get_requested_processing_mode_for_file_item(
+                item,
+                file_obj=None,
+                default_mode=FILE_PROCESSING_MODE_RETRIEVAL,
+            )
+            == FILE_PROCESSING_MODE_NATIVE_FILE
+            for item in (metadata.get("files") or [])
+            if isinstance(item, dict)
+        ):
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "native_file_input_failed",
+                    "message": "Native file processing failed.",
+                    "reason": str(e),
+                },
+            ) from e
 
     current_chat_resources_context = _build_current_chat_resources_context(
         metadata.get("files") or [],

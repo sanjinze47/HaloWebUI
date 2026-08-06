@@ -2,5 +2,7 @@ services:
   open-webui:
     build:
       args:
+        WEBUI_VERSION: ${WEBUI_VERSION-0.2.0}
+        WEBUI_BUILD_HASH: ${WEBUI_BUILD_HASH-unknown}
         HALO_RUNTIME_PROFILE: slim
     image: ghcr.io/sanjinze47/halowebui:${WEBUI_DOCKER_TAG-slim}

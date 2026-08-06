@@ -74,12 +74,16 @@ const LEGACY_SIZE_TO_ASPECT_RATIO: Record<string, string> = {
 
 export const normalizeGeminiImageSize = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim().toUpperCase();
-	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
+	return GEMINI_IMAGE_SIZE_OPTIONS.some((option) => option.value === normalized)
+		? normalized
+		: null;
 };
 
 export const normalizeAspectRatio = (value: unknown): string | null => {
 	const normalized = `${value ?? ''}`.trim();
-	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized) ? normalized : null;
+	return IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === normalized)
+		? normalized
+		: null;
 };
 
 export const normalizeGrokAspectRatio = (value: unknown): string | null => {
@@ -96,7 +100,9 @@ export const normalizeGrokResolution = (value: unknown): string | null => {
 		: null;
 };
 
-export const mapLegacySizeToGeminiParams = (size: unknown): {
+export const mapLegacySizeToGeminiParams = (
+	size: unknown
+): {
 	imageSize: string | null;
 	aspectRatio: string | null;
 } => {
@@ -150,8 +156,7 @@ export const looksLikeImageValveSpec = (schema: any): boolean => {
 export const getImageValveProperty = (
 	schema: any,
 	key: 'image_size' | 'aspect_ratio' | 'resolution'
-) =>
-	schema?.properties?.[key] ?? null;
+) => schema?.properties?.[key] ?? null;
 
 export const getPropertyEnumOptions = (
 	property: any,
@@ -254,6 +259,24 @@ export const getOpenAIImageRouteOptions = (
 	}
 
 	return options;
+};
+
+export const parseNaturalImageSize = (prompt: unknown): string | null => {
+	const text = `${prompt ?? ''}`.trim().toLowerCase();
+	if (!text) return null;
+	const directSafe = text.match(/(?<!\d)(\d{2,5})\s*(?:x|\u00d7)\s*(\d{2,5})(?!\d)/);
+	if (directSafe) return `${Number(directSafe[1])}x${Number(directSafe[2])}`;
+	const namedSafe = text.match(
+		/(?:\u5bbd|width)\s*[:\uFF1A]?\s*(\d{2,5}).*?(?:\u9ad8|height)\s*[:\uFF1A]?\s*(\d{2,5})/
+	);
+	if (namedSafe) return `${Number(namedSafe[1])}x${Number(namedSafe[2])}`;
+	const squareSafe = text.match(
+		/(?:\u6b63\u65b9\u5f62|square)\s*(?:\u56fe\u7247|image)?\s*(\d{3,5})/
+	);
+	if (squareSafe) return `${Number(squareSafe[1])}x${Number(squareSafe[1])}`;
+	if (/16\s*[:\uFF1A]\s*9\s*(?:2k|2048)/.test(text)) return '2048x1152';
+	if (/9\s*[:\uFF1A]\s*16\s*(?:2k|2048)/.test(text)) return '1152x2048';
+	return null;
 };
 
 export const getBuiltinImageEngine = (model: any | null): '' | 'openai' | 'gemini' | 'grok' => {

@@ -8,6 +8,8 @@ services:
         PRELOAD_LOCAL_MODELS: ${PRELOAD_LOCAL_MODELS-false}
         ENABLE_PYODIDE: ${ENABLE_PYODIDE-false}
         VITE_SOURCEMAP: ${VITE_SOURCEMAP-false}
+        WEBUI_VERSION: ${WEBUI_VERSION-0.2.0}
+        WEBUI_BUILD_HASH: ${WEBUI_BUILD_HASH-unknown}
         HALO_RUNTIME_PROFILE: ${HALO_RUNTIME_PROFILE-main}
     image: ghcr.io/sanjinze47/halowebui:${WEBUI_DOCKER_TAG-latest}
     pull_policy: always
