@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import uuid
 from fnmatch import fnmatch
 from pathlib import Path
@@ -18,6 +19,10 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, StreamingResponse
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.config import (
+    FILE_MAX_TOTAL_SIZE,
+    RAG_ALLOWED_FILE_MIME_TYPES,
+)
 from open_webui.env import SRC_LOG_LEVELS
 from open_webui.models.files import (
     FileForm,
@@ -52,6 +57,215 @@ log.setLevel(SRC_LOG_LEVELS["MODELS"])
 router = APIRouter()
 
 
+_SIZE_SUFFIXES = {
+    "kb": 1024,
+    "kib": 1024,
+    "mb": 1024 * 1024,
+    "mib": 1024 * 1024,
+    "gb": 1024 * 1024 * 1024,
+    "gib": 1024 * 1024 * 1024,
+}
+
+
+def _unwrap_config_value(value):
+    return getattr(value, "value", value)
+
+
+def _coerce_size_limit_bytes(value, *, default_unit: str = "mb") -> Optional[int]:
+    value = _unwrap_config_value(value)
+    if value is None or value is False or value == "":
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        number = float(value)
+        unit = default_unit
+    else:
+        match = re.fullmatch(
+            r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I
+        )
+        if not match:
+            return None
+        number = float(match.group(1))
+        unit = (match.group(2) or default_unit).lower()
+
+    if number <= 0:
+        return None
+    multiplier = _SIZE_SUFFIXES.get(unit, 1024 * 1024)
+    return max(1, int(number * multiplier))
+
+
+def _read_upload_size(file: UploadFile) -> int:
+    stream = file.file
+    current_position = stream.tell()
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(0)
+    if current_position and size == 0:
+        stream.seek(current_position)
+    return max(0, int(size))
+
+
+def _normalize_mime_type(content_type: Optional[str]) -> str:
+    return str(content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _normalize_allowed_values(value, *, strip_dot: bool = False) -> list[str]:
+    value = _unwrap_config_value(value)
+    if isinstance(value, str):
+        values = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        return []
+
+    normalized = []
+    for item in values:
+        item = str(item or "").strip().lower()
+        if strip_dot:
+            item = item.lstrip(".")
+        if item:
+            normalized.append(item)
+    return normalized
+
+
+def _get_allowed_mime_types(request: Request) -> list[str]:
+    configured = getattr(request.app.state.config, "ALLOWED_FILE_MIME_TYPES", None)
+    if configured is None:
+        configured = RAG_ALLOWED_FILE_MIME_TYPES
+    return _normalize_allowed_values(configured)
+
+
+
+def _mime_type_is_allowed(content_type: str, allowed_types: list[str]) -> bool:
+    if not allowed_types:
+        return True
+    return any(
+        allowed == content_type
+        or (allowed.endswith("/*") and content_type.startswith(allowed[:-1]))
+        for allowed in allowed_types
+    )
+
+
+def _build_upload_validation_diagnostic(
+    code: str,
+    *,
+    filename: str,
+    message: str,
+    hint: str,
+    size: Optional[int] = None,
+    limit: Optional[int] = None,
+    content_type: Optional[str] = None,
+) -> dict:
+    diagnostic = {
+        "code": code,
+        "title": "File upload validation failed.",
+        "message": message,
+        "hint": hint,
+        "blocking": True,
+        "filename": filename,
+    }
+    if size is not None:
+        diagnostic["size"] = size
+    if limit is not None:
+        diagnostic["limit"] = limit
+    if content_type:
+        diagnostic["content_type"] = content_type
+    return diagnostic
+
+
+def _validate_uploaded_file(
+    request: Request,
+    file: UploadFile,
+    *,
+    filename: str,
+    process: bool,
+) -> int:
+    size = _read_upload_size(file)
+    content_type = _normalize_mime_type(file.content_type)
+    if size <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "The uploaded file is empty.",
+                "diagnostic": _build_upload_validation_diagnostic(
+                    "empty_file",
+                    filename=filename,
+                    message="The uploaded file is empty.",
+                    hint="Choose a non-empty file and try again.",
+                    size=size,
+                    content_type=content_type,
+                ),
+            },
+        )
+
+    config = request.app.state.config
+    single_limit = _coerce_size_limit_bytes(
+        getattr(config, "FILE_MAX_SIZE", None)
+    )
+    if single_limit is None:
+        single_limit = _coerce_size_limit_bytes(
+            os.environ.get("RAG_FILE_MAX_SIZE")
+        )
+    if single_limit is not None and size > single_limit:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "message": "The uploaded file exceeds the configured size limit.",
+                "diagnostic": _build_upload_validation_diagnostic(
+                    "file_too_large",
+                    filename=filename,
+                    message="The uploaded file exceeds the configured size limit.",
+                    hint="Choose a smaller file or increase the upload size limit.",
+                    size=size,
+                    limit=single_limit,
+                    content_type=content_type,
+                ),
+            },
+        )
+
+    allowed_mime_types = _get_allowed_mime_types(request)
+    if not _mime_type_is_allowed(content_type, allowed_mime_types):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": f"MIME type {content_type or 'unknown'} is not allowed.",
+                "diagnostic": _build_upload_validation_diagnostic(
+                    "mime_type_not_allowed",
+                    filename=filename,
+                    message=f"MIME type {content_type or 'unknown'} is not allowed.",
+                    hint="Choose a file with an allowed MIME type and try again.",
+                    size=size,
+                    content_type=content_type,
+                ),
+            },
+        )
+
+    extension = os.path.splitext(filename)[1].lstrip(".").lower()
+    allowed_extensions = _normalize_allowed_values(
+        getattr(config, "ALLOWED_FILE_EXTENSIONS", None), strip_dot=True
+    )
+    if process and allowed_extensions and extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": f"File type {extension or 'unknown'} is not allowed.",
+                "diagnostic": _build_upload_validation_diagnostic(
+                    "file_extension_not_allowed",
+                    filename=filename,
+                    message=f"File type {extension or 'unknown'} is not allowed.",
+                    hint="Choose a file with an allowed extension and try again.",
+                    size=size,
+                    content_type=content_type,
+                ),
+            },
+        )
+
+    return size
+
+
 def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
     if file_id:
         try:
@@ -60,6 +274,11 @@ def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
                 VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
         except Exception as exc:
             log.debug("Failed to delete temporary file collection %s: %s", file_id, exc)
+
+        try:
+            _clear_file_remote_cache(Files.get_file_by_id(file_id))
+        except Exception as exc:
+            log.debug("Failed to clear remote file cache %s: %s", file_id, exc)
 
         try:
             Files.delete_file_by_id(file_id)
@@ -71,6 +290,22 @@ def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
             Storage.delete_file(file_path)
         except Exception as exc:
             log.debug("Failed to delete uploaded file %s: %s", file_path, exc)
+
+
+def _clear_file_remote_cache(file_obj: Optional[FileModel]) -> None:
+    if not file_obj:
+        return
+    meta = dict(file_obj.meta or {})
+    openai_meta = dict(meta.get("openai") or {})
+    files_map = openai_meta.get("files")
+    if not isinstance(files_map, dict) or not files_map:
+        return
+    openai_meta["files"] = {}
+    meta["openai"] = openai_meta
+    try:
+        Files.update_file_metadata_by_id(file_obj.id, meta)
+    except Exception as exc:
+        log.debug("Failed to clear remote file cache for %s: %s", file_obj.id, exc)
 
 
 ############################
@@ -156,30 +391,20 @@ def upload_file(
                 detail=build_file_upload_error_detail(diagnostic),
             )
 
-        file_extension = os.path.splitext(filename)[1]
-        file_extension = file_extension[1:].lower() if file_extension else ""
-        allowed_extensions = getattr(
-            request.app.state.config, "ALLOWED_FILE_EXTENSIONS", None
+        upload_size = _validate_uploaded_file(
+            request,
+            file,
+            filename=filename,
+            process=process,
         )
-        if process and allowed_extensions:
-            normalized_extensions = [
-                str(ext).strip().lower().lstrip(".")
-                for ext in allowed_extensions
-                if str(ext).strip()
-            ]
-            if file_extension not in normalized_extensions:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT(
-                        f"File type {file_extension} is not allowed"
-                    ),
-                )
 
         # replace filename with uuid
         id = str(uuid.uuid4())
         name = filename
         filename = f"{id}_{filename}"
         file_size, file_path = Storage.upload_file(file.file, filename)
+        if not file_size:
+            file_size = upload_size
         requested_processing_mode = resolve_file_processing_mode_from_config(
             request.app.state.config, processing_mode
         )
@@ -202,7 +427,10 @@ def upload_file(
                 }
             ),
         )
-        if process:
+        # Auto mode is resolved after the final chat model/connection is known.
+        # Keep the original upload untouched until then; knowledge-base uploads
+        # continue to use their explicit retrieval mode.
+        if process and requested_processing_mode != "auto":
             try:
                 warning_message = None
                 if file.content_type in [
@@ -375,6 +603,8 @@ async def search_files(
 
 @router.delete("/all")
 async def delete_all_files(user=Depends(get_admin_user)):
+    for file_obj in Files.get_files():
+        _clear_file_remote_cache(file_obj)
     result = Files.delete_all_files()
     if result:
         try:
@@ -663,6 +893,7 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
     if _user_can_access_file(file, user, "write"):
         # We should add Chroma cleanup here
 
+        _clear_file_remote_cache(file)
         result = Files.delete_file_by_id(id)
         if result:
             try:

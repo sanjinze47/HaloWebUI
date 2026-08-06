@@ -181,6 +181,7 @@ from open_webui.config import (
     CACHE_DIR,
     DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     DEFAULT_CODE_INTERPRETER_PROMPT,
+    FILE_MAX_TOTAL_SIZE,
 )
 from open_webui.env import (
     SRC_LOG_LEVELS,

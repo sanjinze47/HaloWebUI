@@ -39,7 +39,9 @@ from open_webui.utils.user_default_settings import (
     sanitize_new_user_default_settings,
 )
 from open_webui.retrieval.document_processing_shared import (
+    FILE_PROCESSING_MODE_AUTO,
     FILE_PROCESSING_MODE_FULL_CONTEXT,
+    FILE_PROCESSING_MODE_NATIVE_FILE,
     FILE_PROCESSING_MODE_RETRIEVAL,
     build_default_document_provider_configs,
     derive_document_provider_from_legacy_engine,
@@ -121,6 +123,8 @@ def _get_default_file_processing_mode() -> str:
     if configured in {
         FILE_PROCESSING_MODE_RETRIEVAL,
         FILE_PROCESSING_MODE_FULL_CONTEXT,
+        FILE_PROCESSING_MODE_NATIVE_FILE,
+        FILE_PROCESSING_MODE_AUTO,
     }:
         return configured
 
@@ -2716,6 +2720,18 @@ RAG_FILE_MAX_SIZE = PersistentConfig(
     ),
 )
 
+RAG_FILE_MAX_TOTAL_SIZE = PersistentConfig(
+    "RAG_FILE_MAX_TOTAL_SIZE",
+    "rag.file.max_total_size",
+    (
+        int(os.environ.get("RAG_FILE_MAX_TOTAL_SIZE"))
+        if os.environ.get("RAG_FILE_MAX_TOTAL_SIZE")
+        else None
+    ),
+)
+
+FILE_MAX_TOTAL_SIZE = RAG_FILE_MAX_TOTAL_SIZE
+
 FILE_IMAGE_COMPRESSION_WIDTH = PersistentConfig(
     "FILE_IMAGE_COMPRESSION_WIDTH",
     "file.image_compression_width",
@@ -2741,6 +2757,18 @@ RAG_ALLOWED_FILE_EXTENSIONS = PersistentConfig(
     "rag.file.allowed_extensions",
     [ext.strip() for ext in os.environ.get("RAG_ALLOWED_FILE_EXTENSIONS", "").split(",") if ext.strip()],
 )
+
+RAG_ALLOWED_FILE_MIME_TYPES = PersistentConfig(
+    "RAG_ALLOWED_FILE_MIME_TYPES",
+    "rag.file.allowed_mime_types",
+    [
+        mime.strip().lower()
+        for mime in os.environ.get("RAG_ALLOWED_FILE_MIME_TYPES", "").split(",")
+        if mime.strip()
+    ],
+)
+
+ALLOWED_FILE_MIME_TYPES = RAG_ALLOWED_FILE_MIME_TYPES
 
 RAG_EMBEDDING_ENGINE = PersistentConfig(
     "RAG_EMBEDDING_ENGINE",

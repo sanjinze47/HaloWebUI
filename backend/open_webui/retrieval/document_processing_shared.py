@@ -7,10 +7,19 @@ from typing import Any, Optional
 FILE_PROCESSING_MODE_RETRIEVAL = "retrieval"
 FILE_PROCESSING_MODE_FULL_CONTEXT = "full_context"
 FILE_PROCESSING_MODE_NATIVE_FILE = "native_file"
+FILE_PROCESSING_MODE_AUTO = "auto"
 FILE_PROCESSING_MODES = {
     FILE_PROCESSING_MODE_RETRIEVAL,
     FILE_PROCESSING_MODE_FULL_CONTEXT,
     FILE_PROCESSING_MODE_NATIVE_FILE,
+    FILE_PROCESSING_MODE_AUTO,
+}
+
+FILE_FAILURE_STRATEGY_STRICT = "strict"
+FILE_FAILURE_STRATEGY_COMPAT = "compat"
+FILE_FAILURE_STRATEGIES = {
+    FILE_FAILURE_STRATEGY_STRICT,
+    FILE_FAILURE_STRATEGY_COMPAT,
 }
 
 DOCUMENT_PROVIDER_LOCAL_DEFAULT = "local_default"
@@ -94,6 +103,39 @@ def normalize_file_processing_mode(
     return fallback
 
 
+def normalize_file_failure_strategy(
+    strategy: Optional[str], fallback: str = FILE_FAILURE_STRATEGY_COMPAT
+) -> str:
+    value = str(strategy or "").strip().lower()
+    if value in FILE_FAILURE_STRATEGIES:
+        return value
+    return fallback
+
+
+def resolve_chat_file_processing_mode(
+    mode: Optional[str],
+    *,
+    official_openai: bool = False,
+    fallback: str = FILE_PROCESSING_MODE_RETRIEVAL,
+) -> str:
+    """Resolve an attachment's auto strategy after the final model is known."""
+    requested = normalize_file_processing_mode(mode, fallback)
+    if requested != FILE_PROCESSING_MODE_AUTO:
+        return requested
+    if official_openai:
+        return FILE_PROCESSING_MODE_NATIVE_FILE
+
+    compatible_fallback = normalize_file_processing_mode(
+        fallback, FILE_PROCESSING_MODE_RETRIEVAL
+    )
+    if compatible_fallback in {
+        FILE_PROCESSING_MODE_AUTO,
+        FILE_PROCESSING_MODE_NATIVE_FILE,
+    }:
+        return FILE_PROCESSING_MODE_RETRIEVAL
+    return compatible_fallback
+
+
 def normalize_document_provider(
     provider: Optional[str], fallback: str = DOCUMENT_PROVIDER_LOCAL_DEFAULT
 ) -> str:
@@ -127,7 +169,10 @@ def derive_document_provider_from_legacy_engine(engine: Optional[str]) -> str:
 
 
 def should_extract_for_mode(mode: str) -> bool:
-    return normalize_file_processing_mode(mode) != FILE_PROCESSING_MODE_NATIVE_FILE
+    return normalize_file_processing_mode(mode) not in {
+        FILE_PROCESSING_MODE_NATIVE_FILE,
+        FILE_PROCESSING_MODE_AUTO,
+    }
 
 
 def should_index_for_mode(mode: str) -> bool:
