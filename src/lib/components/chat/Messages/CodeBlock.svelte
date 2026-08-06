@@ -5,6 +5,7 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { copyToClipboard } from '$lib/utils';
+	import { preserveCodeBlockText } from '$lib/utils/code-copy';
 
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import SvgPanZoom from '$lib/components/common/SVGPanZoom.svelte';
@@ -82,7 +83,7 @@
 	let pyodideWorker: Worker | null = null;
 
 	let _code = '';
-	$: if (code) {
+	$: if (code !== undefined && code !== null) {
 		updateCode();
 	}
 
@@ -175,7 +176,7 @@
 
 	const copyCode = async () => {
 		copied = true;
-		await copyToClipboard(code);
+		await copyToClipboard(preserveCodeBlockText(_code));
 
 		setTimeout(() => {
 			copied = false;
@@ -495,7 +496,7 @@
 					content={_token?.text ?? ''}
 				/>
 			{:else}
-				<pre class="mermaid">{code}</pre>
+				<pre class="mermaid" data-code-copy-text={_code}>{code}</pre>
 			{/if}
 		{:else}
 			<div
@@ -662,6 +663,7 @@
 
 			<div
 				bind:this={codeWrapperEl}
+				data-code-copy-text={_code}
 				class="language-{lang} {editorClassName
 					? editorClassName
 					: executing || stdout || stderr || result

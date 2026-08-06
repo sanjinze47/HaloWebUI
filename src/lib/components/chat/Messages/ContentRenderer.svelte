@@ -15,6 +15,15 @@
 	} from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList } from '$lib/utils';
+	import {
+		CODE_BLOCK_COPY_SELECTOR,
+		CODE_BLOCK_COPY_TEXT_ATTRIBUTE,
+		createCodeCopyPayload,
+		getCodeBlockElement,
+		getCodeBlockTextContent,
+		preserveCodeBlockText,
+		type CodeCopyPayload
+	} from '$lib/utils/code-copy';
 	import { getCitationEntries } from '$lib/utils/citations';
 	import type { GeneratedMessageFile } from '$lib/utils/generated-file-links';
 	import {
@@ -66,10 +75,6 @@
 		bottom: number;
 	};
 
-	type CopyPayload = {
-		text: string;
-		html: string;
-	};
 	type MessageModel = any;
 	type MessageSource = Record<string, any>;
 	type FloatingAction = any;
@@ -157,7 +162,7 @@
 		});
 	};
 
-	const getPlainTextFromFragment = (container: HTMLElement): string => {
+	const getRenderedPlainText = (container: HTMLElement): string => {
 		const measurementHost = document.createElement('div');
 		measurementHost.style.position = 'fixed';
 		measurementHost.style.left = '-99999px';
@@ -168,15 +173,100 @@
 		measurementHost.appendChild(container);
 		document.body.appendChild(measurementHost);
 
-		const text = (measurementHost.innerText || measurementHost.textContent || '')
-			.replace(/\u00a0/g, ' ')
-			.trim();
+		const text = (measurementHost.innerText || measurementHost.textContent || '').replace(
+			/\u00a0/g,
+			' '
+		);
 
 		measurementHost.remove();
 		return text;
 	};
 
-	const buildCopyPayloadFromClone = (clone: Node | DocumentFragment | null): CopyPayload | null => {
+	const getSingleCodeBlockText = (container: HTMLElement): string | null => {
+		const codeBlocks = Array.from(
+			container.querySelectorAll<HTMLElement>(CODE_BLOCK_COPY_SELECTOR)
+		);
+		if (codeBlocks.length !== 1) {
+			return null;
+		}
+
+		const codeBlock = codeBlocks[0];
+		const outsideCodeBlock = container.cloneNode(true) as HTMLElement;
+		outsideCodeBlock.querySelectorAll(CODE_BLOCK_COPY_SELECTOR).forEach((node) => node.remove());
+		const outsideText = (outsideCodeBlock.textContent || '').replace(/\u00a0/g, ' ').trim();
+
+		return outsideText === '' ? getCodeBlockTextContent(codeBlock) : null;
+	};
+
+	const getPlainTextFromFragment = (
+		container: HTMLElement,
+		useCodeBlockSourceText = true
+	): string => {
+		if (!useCodeBlockSourceText) {
+			return getRenderedPlainText(container);
+		}
+
+		const singleCodeBlockText = getSingleCodeBlockText(container);
+		if (singleCodeBlockText !== null) {
+			return preserveCodeBlockText(singleCodeBlockText);
+		}
+
+		const codeBlocks = Array.from(
+			container.querySelectorAll<HTMLElement>(CODE_BLOCK_COPY_SELECTOR)
+		);
+		const markers = codeBlocks.flatMap((codeBlock, index) => {
+			const text = getCodeBlockTextContent(codeBlock);
+			if (text === null) {
+				return [];
+			}
+
+			let marker = `__HALO_CODE_BLOCK_${index}__`;
+			while (text.includes(marker)) {
+				marker += '_';
+			}
+
+			codeBlock.textContent = marker;
+			return [{ marker, text: preserveCodeBlockText(text) }];
+		});
+
+		if (markers.length === 0) {
+			return getRenderedPlainText(container).trim();
+		}
+
+		return markers.reduce(
+			(text, { marker, text: codeText }) => text.split(marker).join(codeText),
+			getRenderedPlainText(container).trim()
+		);
+	};
+
+	const isRangeEntireCodeBlock = (range: Range, codeBlock: Element): boolean => {
+		const sourceElement =
+			codeBlock.querySelector<HTMLElement>('.cm-content, pre') ?? (codeBlock as HTMLElement);
+		const sourceRange = document.createRange();
+		sourceRange.selectNodeContents(sourceElement);
+
+		return (
+			range.compareBoundaryPoints(Range.START_TO_START, sourceRange) === 0 &&
+			range.compareBoundaryPoints(Range.END_TO_END, sourceRange) === 0
+		);
+	};
+
+	const getSelectedCodeBlock = (range: Range): Element | null => {
+		const commonAncestor = getCodeBlockElement(range.commonAncestorContainer);
+		if (commonAncestor) {
+			return commonAncestor;
+		}
+
+		const startCodeBlock = getCodeBlockElement(range.startContainer);
+		const endCodeBlock = getCodeBlockElement(range.endContainer);
+		return startCodeBlock && startCodeBlock === endCodeBlock ? startCodeBlock : null;
+	};
+
+	const buildCopyPayloadFromClone = (
+		clone: Node | DocumentFragment | null,
+		plainTextOverride: string | null = null,
+		useCodeBlockSourceText = true
+	): CodeCopyPayload | null => {
 		if (!clone) {
 			return null;
 		}
@@ -185,20 +275,27 @@
 		container.appendChild(clone);
 		normalizeCopyFragment(container);
 
-		const text = getPlainTextFromFragment(container.cloneNode(true) as HTMLElement);
+		const text =
+			plainTextOverride === null
+				? getPlainTextFromFragment(
+						container.cloneNode(true) as HTMLElement,
+						useCodeBlockSourceText
+					)
+				: preserveCodeBlockText(plainTextOverride);
+
+		container.querySelectorAll(CODE_BLOCK_COPY_SELECTOR).forEach((node) => {
+			node.removeAttribute(CODE_BLOCK_COPY_TEXT_ATTRIBUTE);
+		});
 		const html = container.innerHTML.trim();
 
 		if (text === '' && html === '') {
 			return null;
 		}
 
-		return {
-			text,
-			html
-		};
+		return createCodeCopyPayload(text, html);
 	};
 
-	export function getCopyPayload(): CopyPayload | null {
+	export function getCopyPayload(): CodeCopyPayload | null {
 		if (!contentContainerElement) {
 			return null;
 		}
@@ -212,16 +309,22 @@
 	}
 
 	export function getSelectionCopyPayload(selection: Selection | null = window.getSelection()) {
+		const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+		const selectedCodeBlock = range ? getSelectedCodeBlock(range) : null;
+		const selectedCodeText =
+			range && selectedCodeBlock && isRangeEntireCodeBlock(range, selectedCodeBlock)
+				? getCodeBlockTextContent(selectedCodeBlock)
+				: null;
+
 		if (
 			!contentContainerElement ||
 			!selection ||
-			selection.rangeCount === 0 ||
-			selection.toString().trim() === ''
+			!range ||
+			(range.collapsed || (selection.toString().trim() === '' && !selectedCodeBlock))
 		) {
 			return null;
 		}
 
-		const range = selection.getRangeAt(0);
 		const selectionTouchesThisMessage =
 			contentContainerElement.contains(range.commonAncestorContainer) ||
 			contentContainerElement.contains(range.startContainer) ||
@@ -231,7 +334,11 @@
 			return null;
 		}
 
-		return buildCopyPayloadFromClone(range.cloneContents());
+		return buildCopyPayloadFromClone(
+			range.cloneContents(),
+			selectedCodeText,
+			!selectedCodeBlock || selectedCodeText !== null
+		);
 	}
 
 	const handleContentCopy = (event: ClipboardEvent) => {
