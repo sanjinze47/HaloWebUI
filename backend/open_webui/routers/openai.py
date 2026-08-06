@@ -3408,7 +3408,14 @@ async def generate_chat_completion(
                             f"native-file flow.\n{message}"
                         )
 
-                    if client_stream:
+                    # Native web search and native file input failures must
+                    # reach the chat middleware as exceptions so its one-shot
+                    # retry paths can run. Returning an HTTP 200 SSE error
+                    # here makes the outer request look successful and hides
+                    # the retry opportunity.
+                    if client_stream and not (
+                        native_web_search or native_file_inputs
+                    ):
                         streaming = True
                         return StreamingResponse(
                             error_sse_generator(message, code="responses_api_error"),

@@ -604,9 +604,16 @@ def convert_chat_completions_to_responses_payload(
         responses_payload["tools"] = tools
 
         # Smart web search has already decided this turn needs live results.
-        # Force the hosted search tool instead of merely offering it.
+        # Sub2API accepts the scalar Responses API value for required tool use
+        # more reliably than the named-tool object form. Keep the latter for
+        # standard Responses connections so other configured tools cannot be
+        # selected accidentally.
         if native_web_search_required:
-            responses_payload["tool_choice"] = {"type": native_web_search_tool_type}
+            responses_payload["tool_choice"] = (
+                "required"
+                if compatibility_mode == "sub2api"
+                else {"type": native_web_search_tool_type}
+            )
         elif "tool_choice" not in responses_payload:
             responses_payload["tool_choice"] = "auto"
 

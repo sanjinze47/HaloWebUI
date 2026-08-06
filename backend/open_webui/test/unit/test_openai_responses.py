@@ -147,6 +147,25 @@ def test_convert_chat_completions_to_responses_payload_forces_native_web_search_
     assert r["tool_choice"] == {"type": "web_search"}
 
 
+def test_sub2api_native_web_search_uses_compatible_required_tool_choice():
+    chat = {
+        "model": "gpt-5.6-luna",
+        "messages": [{"role": "user", "content": "Search today's news"}],
+        "max_tokens": 512,
+    }
+
+    r = convert_chat_completions_to_responses_payload(
+        chat,
+        native_web_search_tool_type="web_search",
+        native_web_search_required=True,
+        responses_compatibility="sub2api",
+    )
+
+    assert r["tools"] == [{"type": "web_search"}]
+    assert r["tool_choice"] == "required"
+    assert "max_output_tokens" not in r
+
+
 def test_convert_chat_completions_to_responses_payload_strips_include_usage_stream_option():
     chat = {
         "model": "gpt-test",

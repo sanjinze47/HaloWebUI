@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-07
+
+### Fixed
+
+- 修复模型原生联网搜索在 Responses API 流式请求中返回 HTTP 502 的兼容问题。
+- 使用 Responses API 通用的 `tool_choice: required` 强制调用原生搜索，兼容 Sub2API。
+- 修复原生搜索和原生文件请求错误无法进入重试与诊断流程的问题。
+
 ## [0.2.0] - 2026-08-06
 
 ### Highlights
