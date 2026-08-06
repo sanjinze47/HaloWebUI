@@ -9,17 +9,17 @@
 
   <br/>
 
-  <a href="https://github.com/ztx888/HaloWebUI/stargazers">
-    <img src="https://img.shields.io/github/stars/ztx888/HaloWebUI?style=for-the-badge&logo=github&color=f4c542" alt="Stars" />
+  <a href="https://github.com/sanjinze47/HaloWebUI/stargazers">
+    <img src="https://img.shields.io/github/stars/sanjinze47/HaloWebUI?style=for-the-badge&logo=github&color=f4c542" alt="Stars" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/network/members">
-    <img src="https://img.shields.io/github/forks/ztx888/HaloWebUI?style=for-the-badge&logo=github&color=8ac926" alt="Forks" />
+  <a href="https://github.com/sanjinze47/HaloWebUI/network/members">
+    <img src="https://img.shields.io/github/forks/sanjinze47/HaloWebUI?style=for-the-badge&logo=github&color=8ac926" alt="Forks" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/commits/main">
-    <img src="https://img.shields.io/github/last-commit/ztx888/HaloWebUI/main?style=for-the-badge&logo=git&color=ff595e" alt="Last Commit" />
+  <a href="https://github.com/sanjinze47/HaloWebUI/commits/main">
+    <img src="https://img.shields.io/github/last-commit/sanjinze47/HaloWebUI/main?style=for-the-badge&logo=git&color=ff595e" alt="Last Commit" />
   </a>
-  <a href="https://github.com/ztx888/HaloWebUI/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/ztx888/HaloWebUI?style=for-the-badge&color=6a4c93" alt="License" />
+  <a href="https://github.com/sanjinze47/HaloWebUI/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/sanjinze47/HaloWebUI?style=for-the-badge&color=6a4c93" alt="License" />
   </a>
 
   <br/><br/>
@@ -61,7 +61,7 @@ docker run -d -p 3000:8080 \
   -v open-webui:/app/backend/data \
   --name halowebui \
   --restart always \
-  ghcr.io/ztx888/halowebui:main
+  ghcr.io/sanjinze47/halowebui:latest
 ```
 
 ### Docker Compose（默认推荐）
@@ -71,6 +71,28 @@ docker compose up -d
 ```
 
 启动完成后访问 **http://localhost:3000** ，首次注册的用户自动成为管理员。
+
+### 版本与升级
+
+默认 Compose 配置使用 GHCR 的 `latest` 镜像。升级时先拉取新镜像，再重建容器：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+生产环境可以固定到版本标签，避免自动获取未预期的更新：
+
+```bash
+WEBUI_DOCKER_TAG=0.1.0 docker compose pull
+WEBUI_DOCKER_TAG=0.1.0 docker compose up -d
+```
+
+回滚时将 `WEBUI_DOCKER_TAG` 设置为上一个版本标签后重复上述命令。首次发布后，请在 GitHub 仓库的 **Packages** 设置中确认 `halowebui` 可见性为 **Public**，这样公开 GHCR 镜像无需登录；如果管理员将包设置为私有，先执行：
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io -u sanjinze47 --password-stdin
+```
 
 ### 首屏加载优化
 
@@ -146,7 +168,7 @@ docker run -d -p 3000:8080 \
   -v open-webui:/app/backend/data \
   --name halowebui \
   --restart always \
-  ghcr.io/ztx888/halowebui:slim
+  ghcr.io/sanjinze47/halowebui:slim
 ```
 
 ### Docker Compose（轻量版 slim）
@@ -212,11 +234,11 @@ HaloWebUI 基于 [Open WebUI](https://github.com/open-webui/open-webui) 深度�
 
 ### ⭐ Star History
 
-<a href="https://star-history.com/#ztx888/HaloWebUI&Date">
+<a href="https://star-history.com/#sanjinze47/HaloWebUI&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ztx888/HaloWebUI&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ztx888/HaloWebUI&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ztx888/HaloWebUI&type=Date" width="680" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sanjinze47/HaloWebUI&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=sanjinze47/HaloWebUI&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sanjinze47/HaloWebUI&type=Date" width="680" />
   </picture>
 </a>
 

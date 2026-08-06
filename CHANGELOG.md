@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-08-06
+
+### Highlights
+
+- **独立版本治理**: 为 HaloWebUI fork 建立统一的语义化版本、变更日志和 GitHub Release 流程。
+- **可追踪构建**: 前端设置区域、后端配置接口和 Docker 镜像均显示版本号与构建提交。
+- **GHCR 部署**: 提供 `ghcr.io/sanjinze47/halowebui` 的 amd64/arm64 镜像和 Compose 部署方式。
+
+### Experience
+
+- **版本信息更清晰**: 管理员可以在 General 设置中查看版本、构建提交并打开发行说明。
+- **发布过程更可验证**: Release 工作流会校验 Git 标签与 `package.json` 版本完全一致。
+
 ## [0.0.1] - 2026-03-22
 
 ### Highlights

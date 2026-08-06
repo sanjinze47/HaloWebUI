@@ -18,15 +18,18 @@
 
 	let changelog = null;
 	let currentVersion = WEBUI_VERSION;
+	let buildHash = 'unknown';
 
 	$: currentVersion = $config?.version ?? WEBUI_VERSION;
+	$: buildHash = $config?.build_hash ?? 'unknown';
 
 	const isConflictError = (error: unknown) => (error as { status?: number })?.status === 409;
 
 	const dismissChangelog = async () => {
-		localStorage.version = $config.version;
+		const version = $config?.version ?? WEBUI_VERSION;
+		localStorage.version = version;
 		try {
-			await saveUserSettingsPatch(localStorage.token, { version: $config.version });
+			await saveUserSettingsPatch(localStorage.token, { version });
 			show = false;
 		} catch (error) {
 			toast.error(
@@ -56,7 +59,7 @@
 			<button
 				class="self-center"
 				on:click={() => {
-					localStorage.version = $config.version;
+					localStorage.version = $config?.version ?? WEBUI_VERSION;
 					show = false;
 				}}
 			>
@@ -78,6 +81,9 @@
 			<div class="text-sm dark:text-gray-200">
 				V{currentVersion}
 			</div>
+			{#if buildHash !== 'unknown'}
+				<div class="ml-2 text-xs text-gray-400 dark:text-gray-500">Build {buildHash.slice(0, 7)}</div>
+			{/if}
 		</div>
 	</div>
 

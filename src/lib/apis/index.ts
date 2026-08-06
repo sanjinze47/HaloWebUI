@@ -801,7 +801,7 @@ export const getChangelog = async () => {
 	return res;
 };
 
-export const getVersionUpdates = async (token: string) => {
+export const getVersionUpdates = async (token: string = '') => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/version/updates`, {

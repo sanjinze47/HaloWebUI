@@ -3,4 +3,4 @@ services:
     build:
       args:
         HALO_RUNTIME_PROFILE: slim
-    image: ghcr.io/ztx888/halowebui:${WEBUI_DOCKER_TAG-slim}
+    image: ghcr.io/sanjinze47/halowebui:${WEBUI_DOCKER_TAG-slim}

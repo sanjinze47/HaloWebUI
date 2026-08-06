@@ -226,7 +226,7 @@ ENABLE_FORWARD_USER_INFO_HEADERS = (
 # WEBUI_BUILD_HASH
 ####################################
 
-WEBUI_BUILD_HASH = os.environ.get("WEBUI_BUILD_HASH", "dev-build")
+WEBUI_BUILD_HASH = os.environ.get("WEBUI_BUILD_HASH", "unknown")
 
 ####################################
 # DATA/FRONTEND BUILD DIR

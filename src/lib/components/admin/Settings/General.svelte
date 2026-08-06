@@ -1,11 +1,16 @@
 <script lang="ts">
-	import { getWebhookUrl, updateWebhookUrl } from '$lib/apis';
+	import { getVersionUpdates, getWebhookUrl, updateWebhookUrl } from '$lib/apis';
 	import { getAdminConfig, updateAdminConfig } from '$lib/apis/auths';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import HaloSelect from '$lib/components/common/HaloSelect.svelte';
 	import InlineDirtyActions from './InlineDirtyActions.svelte';
-	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
+	import {
+		HALOWEBUI_RELEASES_URL,
+		HALOWEBUI_REPOSITORY,
+		WEBUI_BUILD_HASH,
+		WEBUI_VERSION
+	} from '$lib/constants';
 	import { config, showChangelog } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { Copy, KeyRound } from 'lucide-svelte';
@@ -18,6 +23,7 @@
 
 	let updateAvailable = null;
 	let currentVersion = WEBUI_VERSION;
+	let currentBuildHash = WEBUI_BUILD_HASH;
 	let version = {
 		current: '',
 		latest: ''
@@ -48,6 +54,7 @@
 	let dirtySections: DirtySections = { ...EMPTY_DIRTY_SECTIONS };
 
 	$: currentVersion = $config?.version ?? WEBUI_VERSION;
+	$: currentBuildHash = $config?.build_hash ?? WEBUI_BUILD_HASH;
 
 	// 定义区块字段映射
 	const sectionFields = {
@@ -195,7 +202,14 @@
 			current: currentVersion,
 			latest: currentVersion
 		};
-		updateAvailable = false;
+		try {
+			const result = await getVersionUpdates(localStorage.token);
+			version = result ?? version;
+			updateAvailable = version.latest !== version.current;
+		} catch (error) {
+			console.debug('Version update check unavailable', error);
+			updateAvailable = false;
+		}
 	};
 
 	const updateHandler = async () => {
@@ -288,12 +302,15 @@
 							>
 								Halo WebUI
 							</span>
-							<Tooltip content={WEBUI_BUILD_HASH}>
+							<Tooltip content={currentBuildHash}>
 								<span
 									class="text-sm font-medium text-gray-400 dark:text-gray-500 whitespace-nowrap"
 									>V{currentVersion}</span
 								>
 							</Tooltip>
+							<span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+								Build {currentBuildHash === 'unknown' ? 'unknown' : currentBuildHash.slice(0, 7)}
+							</span>
 							<span
 								class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-400 leading-none"
 							>
@@ -323,7 +340,7 @@
 						</a>
 						<span class="text-gray-300 dark:text-gray-600 select-none">·</span>
 						<a
-							href="https://github.com/ztx888/HaloWebUI"
+							href={HALOWEBUI_REPOSITORY}
 							target="_blank"
 							class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700/40 transition-colors"
 						>
@@ -343,7 +360,7 @@
 						</a>
 						<span class="text-gray-300 dark:text-gray-600 select-none">·</span>
 						<a
-							href="https://github.com/ztx888/HaloWebUI/issues"
+							href={`${HALOWEBUI_REPOSITORY}/issues`}
 							target="_blank"
 							class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/15 transition-colors"
 						>
@@ -439,6 +456,14 @@
 						</svg>
 						{$i18n.t("See what's new")}
 					</button>
+					<a
+						href={HALOWEBUI_RELEASES_URL}
+						target="_blank"
+						rel="noreferrer"
+						class="h-8 px-3 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all active:scale-[0.98] flex items-center gap-1.5 whitespace-nowrap"
+					>
+						Releases
+					</a>
 				</div>
 			</section>
 				<!-- ====== Identity & Security ====== -->

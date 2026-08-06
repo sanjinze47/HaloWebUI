@@ -1,4 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
@@ -7,6 +8,8 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const enablePyodide = process.env.ENABLE_PYODIDE === 'true';
 const enableSourceMap = process.env.VITE_SOURCEMAP === 'true';
+const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version || 'dev';
+const buildHash = process.env.WEBUI_BUILD_HASH || process.env.APP_BUILD_HASH || 'unknown';
 const pyodideRemoteIndexUrl =
 	process.env.PYODIDE_INDEX_URL ?? 'https://cdn.jsdelivr.net/pyodide/v0.27.3/full/';
 const pyodideIndexUrl = enablePyodide ? '/pyodide/' : pyodideRemoteIndexUrl;
@@ -83,8 +86,8 @@ export default defineConfig({
 		}
 	},
 	define: {
-		APP_VERSION: JSON.stringify(process.env.npm_package_version),
-		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build'),
+		APP_VERSION: JSON.stringify(packageVersion),
+		APP_BUILD_HASH: JSON.stringify(buildHash),
 		APP_ENABLE_PYODIDE: JSON.stringify(enablePyodide),
 		APP_PYODIDE_INDEX_URL: JSON.stringify(pyodideIndexUrl)
 	},

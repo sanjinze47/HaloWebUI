@@ -15,7 +15,7 @@ If you're experiencing connection issues, it’s often due to the WebUI docker c
 **Example Docker Command**:
 
 ```bash
-docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name open-webui --restart always ghcr.io/ztx888/halowebui:main
+docker run -d --network=host -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://127.0.0.1:11434 --name halowebui --restart always ghcr.io/sanjinze47/halowebui:latest
 ```
 
 ### Error on Slow Responses for Ollama

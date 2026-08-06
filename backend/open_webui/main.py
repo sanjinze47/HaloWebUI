@@ -595,8 +595,8 @@ print(
 
 
 v{VERSION} - building the best open-source AI user interface.
-{f"Commit: {WEBUI_BUILD_HASH}" if WEBUI_BUILD_HASH != "dev-build" else ""}
-https://github.com/ztx888/HaloWebUI
+{f"Commit: {WEBUI_BUILD_HASH}" if WEBUI_BUILD_HASH not in {"dev-build", "unknown"} else ""}
+https://github.com/sanjinze47/HaloWebUI
 """
 )
 
@@ -2088,6 +2088,7 @@ async def get_app_config(request: Request):
         "status": True,
         "name": app.state.WEBUI_NAME,
         "version": VERSION,
+        "build_hash": WEBUI_BUILD_HASH,
         "default_locale": str(DEFAULT_LOCALE),
         "oauth": {
             "providers": {
@@ -2209,6 +2210,7 @@ async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
 async def get_app_version():
     return {
         "version": VERSION,
+        "build_hash": WEBUI_BUILD_HASH,
     }
 
 
@@ -2223,7 +2225,7 @@ async def get_app_latest_release_version(user=Depends(get_verified_user)):
         timeout = aiohttp.ClientTimeout(total=1)
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             async with session.get(
-                "https://api.github.com/repos/ztx888/HaloWebUI/releases/latest"
+                "https://api.github.com/repos/sanjinze47/HaloWebUI/releases/latest"
             ) as response:
                 response.raise_for_status()
                 data = await response.json()

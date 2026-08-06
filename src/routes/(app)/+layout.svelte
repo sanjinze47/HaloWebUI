@@ -18,6 +18,7 @@
 	import { getUserSettings } from '$lib/apis/users';
 
 	import { WEBUI_VERSION } from '$lib/constants';
+	import { getVersionUpdates } from '$lib/apis';
 	import { compareVersion } from '$lib/utils';
 	import {
 		getTemporaryChatAccess,
@@ -247,7 +248,8 @@
 			});
 
 			if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
-				showChangelog.set($settings?.version !== $config.version);
+				const currentVersion = $config?.version ?? WEBUI_VERSION;
+				showChangelog.set($settings?.version !== currentVersion);
 			}
 
 			const {
@@ -290,10 +292,15 @@
 
 	const checkForVersionUpdates = async () => {
 		const currentVersion = $config?.version ?? WEBUI_VERSION;
-		version = {
-			current: currentVersion,
-			latest: currentVersion
-		};
+		try {
+			version = (await getVersionUpdates(localStorage.token)) ?? {
+				current: currentVersion,
+				latest: currentVersion
+			};
+		} catch (error) {
+			console.debug('Version update check unavailable', error);
+			version = { current: currentVersion, latest: currentVersion };
+		}
 	};
 
 	// Reload banners when navigating back to the homepage

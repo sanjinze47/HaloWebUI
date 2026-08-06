@@ -4,7 +4,7 @@
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
-	import { WEBUI_VERSION } from '$lib/constants';
+	import { HALOWEBUI_RELEASES_URL, WEBUI_VERSION } from '$lib/constants';
 	import XMark from '../icons/XMark.svelte';
 
 	export let version = {
@@ -37,7 +37,7 @@
 			LATEST_VERSION: version.latest
 		})}
 
-		<a href="https://github.com/ztx888/HaloWebUI/releases" target="_blank"
+		<a href={HALOWEBUI_RELEASES_URL} target="_blank" rel="noreferrer"
 			class="underline hover:text-blue-900 dark:hover:text-blue-200 transition-colors">
 			{$i18n.t('Update for the latest features and improvements.')}
 		</a>

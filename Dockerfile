@@ -19,7 +19,7 @@ ARG HALO_PG_CLIENT_MAJORS="14 15 16 17 18"
 # Tiktoken encoding name; models to use can be found at https://huggingface.co/models?library=tiktoken
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
-ARG BUILD_HASH=dev-build
+ARG BUILD_HASH=unknown
 ARG HALO_RUNTIME_PROFILE=main
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
@@ -46,8 +46,9 @@ COPY tailwind.config.js ./
 COPY tsconfig.json ./
 COPY vite.config.ts ./
 
-ENV APP_BUILD_HASH=${BUILD_HASH} \
-    ENABLE_PYODIDE=${ENABLE_PYODIDE} \
+ENV WEBUI_BUILD_HASH=${BUILD_HASH} \
+	APP_BUILD_HASH=${BUILD_HASH} \
+	ENABLE_PYODIDE=${ENABLE_PYODIDE} \
     VITE_SOURCEMAP=${VITE_SOURCEMAP}
 
 RUN npm run build
@@ -192,6 +193,8 @@ HEALTHCHECK CMD python -c "import json, os, urllib.request; response = urllib.re
 USER $UID:$GID
 
 ARG BUILD_HASH
+ENV WEBUI_BUILD_HASH=${BUILD_HASH}
+# Keep the old variable for integrations that read the legacy name.
 ENV WEBUI_BUILD_VERSION=${BUILD_HASH}
 ENV DOCKER=true
 

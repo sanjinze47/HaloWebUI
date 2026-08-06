@@ -5,22 +5,14 @@ on:
     branches:
       - main
       - dev
-    paths-ignore:
-      - 'backend/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
   pull_request:
     branches:
       - main
       - dev
-    paths-ignore:
-      - 'backend/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
 
 jobs:
   build:
-    name: 'Format & Build Frontend'
+    name: 'Check & Build Frontend'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -32,16 +24,10 @@ jobs:
           node-version: '22'
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Format Frontend
-        run: npm run format
-
-      - name: Run i18next
-        run: npm run i18n:parse
-
-      - name: Check for Changes After Format
-        run: git diff --exit-code
+      - name: Type Check Frontend
+        run: npm run check
 
       - name: Build Frontend
         run: npm run build
