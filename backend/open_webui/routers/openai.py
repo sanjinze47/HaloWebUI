@@ -58,9 +58,11 @@ from open_webui.utils.error_handling import (
     read_requests_error_payload,
 )
 from open_webui.utils.openai_responses import (
+    collect_responses_response,
     convert_chat_completions_to_responses_payload,
     convert_responses_to_chat_completions,
     iter_responses_events,
+    resolve_responses_compatibility,
     responses_events_to_chat_completions_sse,
 )
 from open_webui.utils.native_web_search import (
@@ -464,20 +466,9 @@ def _get_native_web_search_tool_type(api_config: dict) -> str:
     Responses API web search tool types vary across providers/proxies.
     Prefer explicit config, otherwise default to OpenAI's hosted web search tool.
     """
-    if not isinstance(api_config, dict):
-        return "web_search_preview"
-
-    tool_types = api_config.get("native_web_search_tool_types")
-    if isinstance(tool_types, list):
-        for t in tool_types:
-            if t and str(t).strip():
-                return str(t).strip()
-
-    tool_type = api_config.get("native_web_search_tool_type")
-    if tool_type and str(tool_type).strip():
-        return str(tool_type).strip()
-
-    return "web_search_preview"
+    return resolve_responses_compatibility(api_config).get(
+        "native_web_search_tool_type", "web_search_preview"
+    )
 
 
 def _should_use_responses_api(
@@ -2604,11 +2595,19 @@ async def health_check_connection(
 
             auto_reasoning_summary_applied = False
             if use_responses_api:
+                responses_compatibility = resolve_responses_compatibility(api_config)
                 payload_dict = convert_chat_completions_to_responses_payload(
                     probe_payload,
                     default_reasoning_summary=_get_default_responses_reasoning_summary(
                         api_config
                     ),
+                    responses_compatibility=responses_compatibility["mode"],
+                    responses_default_instructions=responses_compatibility[
+                        "default_instructions"
+                    ],
+                    responses_omit_max_output_tokens=responses_compatibility[
+                        "omit_max_output_tokens"
+                    ],
                 )
                 auto_reasoning_summary_applied = bool(
                     isinstance(payload_dict.get("reasoning"), dict)
@@ -2979,7 +2978,12 @@ async def generate_chat_completion(
     payload_dict = None
     auto_reasoning_summary_applied = False
     if use_responses_api:
-        web_search_tool_type = _get_native_web_search_tool_type(api_config) if native_web_search else None
+        responses_compatibility = resolve_responses_compatibility(api_config)
+        web_search_tool_type = (
+            responses_compatibility["native_web_search_tool_type"]
+            if native_web_search
+            else None
+        )
         default_reasoning_summary = _get_default_responses_reasoning_summary(
             api_config
         )
@@ -2988,6 +2992,13 @@ async def generate_chat_completion(
             native_web_search_tool_type=web_search_tool_type,
             native_web_search_required=native_web_search_required,
             default_reasoning_summary=default_reasoning_summary,
+            responses_compatibility=responses_compatibility["mode"],
+            responses_default_instructions=responses_compatibility[
+                "default_instructions"
+            ],
+            responses_omit_max_output_tokens=responses_compatibility[
+                "omit_max_output_tokens"
+            ],
         )
         auto_reasoning_summary_applied = bool(
             isinstance(payload_dict.get("reasoning"), dict)
@@ -3409,6 +3420,20 @@ async def generate_chat_completion(
 
             # If the client asked for streaming but upstream returned non-stream JSON,
             # convert to a minimal ChatCompletions SSE (single-shot). This is NOT an endpoint fallback.
+            if not client_stream and looks_streaming:
+                response_data = await collect_responses_response(
+                    iter_responses_events(r.content.iter_any(), content_type=content_type)
+                )
+                if not isinstance(response_data, dict):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=_format_responses_upstream_error(
+                            request_url=request_url, status=502, body=response_data
+                        ),
+                    )
+                response = response_data
+                return convert_responses_to_chat_completions(response, model_id=model_id)
+
             response = await _safe_read_upstream_body(r)
             if not isinstance(response, dict):
                 raise HTTPException(

@@ -6,6 +6,91 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
+RESPONSES_COMPATIBILITY_MODES = {"standard", "sub2api", "custom"}
+SUB2API_DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[str, Any]:
+    """Resolve connection-level defaults for OpenAI-compatible Responses APIs."""
+    config = api_config if isinstance(api_config, dict) else {}
+    mode = str(config.get("responses_compatibility") or "standard").strip().lower()
+    if mode not in RESPONSES_COMPATIBILITY_MODES:
+        mode = "standard"
+
+    default_instructions = config.get("responses_default_instructions")
+    if not isinstance(default_instructions, str):
+        default_instructions = ""
+    default_instructions = default_instructions.strip()
+    if mode == "sub2api" and not default_instructions:
+        default_instructions = SUB2API_DEFAULT_INSTRUCTIONS
+
+    if mode == "sub2api":
+        omit_max_output_tokens = True
+        native_web_search_tool_type = "web_search"
+    elif mode == "custom":
+        omit_max_output_tokens = _coerce_bool(
+            config.get("responses_omit_max_output_tokens"), False
+        )
+        native_web_search_tool_type = ""
+        configured_tool_type = config.get("native_web_search_tool_type")
+        if isinstance(configured_tool_type, str) and configured_tool_type.strip():
+            native_web_search_tool_type = configured_tool_type.strip()
+        else:
+            legacy_tool_types = config.get("native_web_search_tool_types")
+            if isinstance(legacy_tool_types, list):
+                native_web_search_tool_type = next(
+                    (
+                        str(tool_type).strip()
+                        for tool_type in legacy_tool_types
+                        if tool_type and str(tool_type).strip()
+                    ),
+                    "",
+                )
+        if not native_web_search_tool_type:
+            native_web_search_tool_type = "web_search_preview"
+    else:
+        omit_max_output_tokens = False
+        native_web_search_tool_type = ""
+        configured_tool_type = config.get("native_web_search_tool_type")
+        if isinstance(configured_tool_type, str) and configured_tool_type.strip():
+            native_web_search_tool_type = configured_tool_type.strip()
+        else:
+            legacy_tool_types = config.get("native_web_search_tool_types")
+            if isinstance(legacy_tool_types, list):
+                native_web_search_tool_type = next(
+                    (
+                        str(tool_type).strip()
+                        for tool_type in legacy_tool_types
+                        if tool_type and str(tool_type).strip()
+                    ),
+                    "",
+                )
+        if not native_web_search_tool_type:
+            native_web_search_tool_type = "web_search_preview"
+
+    return {
+        "mode": mode,
+        "default_instructions": default_instructions,
+        "omit_max_output_tokens": omit_max_output_tokens,
+        "native_web_search_tool_type": native_web_search_tool_type,
+    }
+
 
 def _stringify_tool_call_args(arguments: Any) -> str:
     if arguments is None:
@@ -293,6 +378,9 @@ def convert_chat_completions_to_responses_payload(
     native_web_search_tool_type: Optional[str] = None,
     native_web_search_required: bool = False,
     default_reasoning_summary: Optional[str] = None,
+    responses_compatibility: Optional[str] = None,
+    responses_default_instructions: Optional[str] = None,
+    responses_omit_max_output_tokens: bool = False,
 ) -> Dict[str, Any]:
     """
     Convert a Chat Completions-style payload into a Responses API payload.
@@ -303,6 +391,23 @@ def convert_chat_completions_to_responses_payload(
     - We intentionally keep the payload minimal: only include optional fields when present.
     """
     responses_payload: Dict[str, Any] = {}
+    compatibility_mode = str(responses_compatibility or "standard").strip().lower()
+    if compatibility_mode not in RESPONSES_COMPATIBILITY_MODES:
+        compatibility_mode = "standard"
+    default_instructions = (
+        responses_default_instructions.strip()
+        if isinstance(responses_default_instructions, str)
+        else ""
+    )
+    if compatibility_mode == "sub2api":
+        if not default_instructions:
+            default_instructions = SUB2API_DEFAULT_INSTRUCTIONS
+        responses_omit_max_output_tokens = True
+        if not native_web_search_tool_type:
+            native_web_search_tool_type = "web_search"
+    elif compatibility_mode == "standard":
+        default_instructions = ""
+        responses_omit_max_output_tokens = False
 
     model = chat_payload.get("model")
     if model:
@@ -381,6 +486,8 @@ def convert_chat_completions_to_responses_payload(
 
     if instructions_parts:
         responses_payload["instructions"] = "\n\n".join(instructions_parts)
+    elif default_instructions:
+        responses_payload["instructions"] = default_instructions
 
     # Core input.
     responses_payload["input"] = input_items
@@ -403,7 +510,7 @@ def convert_chat_completions_to_responses_payload(
     max_tokens = chat_payload.get("max_tokens")
     if max_tokens is None and chat_payload.get("max_completion_tokens") is not None:
         max_tokens = chat_payload.get("max_completion_tokens")
-    if max_tokens is not None:
+    if max_tokens is not None and not responses_omit_max_output_tokens:
         responses_payload["max_output_tokens"] = max_tokens
 
     for key in ("temperature", "top_p"):
@@ -480,11 +587,18 @@ def convert_chat_completions_to_responses_payload(
         tools = responses_payload.get("tools")
         if not isinstance(tools, list):
             tools = []
-        # Don't duplicate an existing web_search tool.
-        has_web_search = any(
-            isinstance(t, dict) and t.get("type", "").startswith("web_search")
-            for t in tools
-        )
+        has_web_search = False
+        for index, tool in enumerate(tools):
+            if not isinstance(tool, dict) or not str(tool.get("type", "")).startswith(
+                "web_search"
+            ):
+                continue
+            has_web_search = True
+            if tool.get("type") != native_web_search_tool_type:
+                tools[index] = {
+                    **tool,
+                    "type": native_web_search_tool_type,
+                }
         if not has_web_search:
             tools.append({"type": native_web_search_tool_type})
         responses_payload["tools"] = tools
@@ -647,6 +761,60 @@ async def iter_responses_events(
             event = _try_json_loads(line)
             if event is not None:
                 yield event
+
+    # Some compatibility gateways omit the final newline after the completed event.
+    trailing = buffer.strip()
+    if trailing:
+        if mode == "sse" and trailing.startswith("data:"):
+            trailing = trailing[5:].strip()
+        if trailing != "[DONE]":
+            event = _try_json_loads(trailing)
+            if event is not None:
+                yield event
+
+
+async def collect_responses_response(events: AsyncIterator[dict]) -> Optional[dict]:
+    """Extract the final response object from a Responses SSE event stream."""
+    completed_response: Optional[dict] = None
+
+    async for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") not in ("response.completed", "response.done"):
+            continue
+
+        response = event.get("response")
+        if isinstance(response, dict):
+            completed_response = response
+        elif isinstance(event.get("output"), list):
+            completed_response = {
+                key: event[key]
+                for key in ("id", "model", "output", "usage", "status", "output_text")
+                if key in event
+            }
+
+    return completed_response
+
+
+async def collect_responses_response_from_text(
+    body: Any,
+    *,
+    content_type: str = "text/event-stream",
+) -> Optional[dict]:
+    """Collect a completed Responses object from an already-read SSE body."""
+    if isinstance(body, bytes):
+        raw_body = body
+    elif isinstance(body, str):
+        raw_body = body.encode("utf-8")
+    else:
+        return None
+
+    async def _body_iter() -> AsyncIterator[bytes]:
+        yield raw_body
+
+    return await collect_responses_response(
+        iter_responses_events(_body_iter(), content_type=content_type)
+    )
 
 
 async def responses_events_to_chat_completions_sse(
