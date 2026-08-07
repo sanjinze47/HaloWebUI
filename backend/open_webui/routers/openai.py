@@ -3401,6 +3401,18 @@ async def generate_chat_completion(
                     message = _format_responses_upstream_error(
                         request_url=request_url, status=r.status, body=response
                     )
+                    if (
+                        native_web_search
+                        and responses_compatibility["mode"] != "sub2api"
+                        and responses_compatibility["native_web_search_tool_type"]
+                        == "web_search_preview"
+                        and r.status >= 500
+                    ):
+                        message += (
+                            "\nIf this connection uses Sub2API, set Responses API "
+                            "compatibility to 'sub2api' so HaloWebUI sends the "
+                            "supported 'web_search' tool instead of 'web_search_preview'."
+                        )
                     if native_file_inputs:
                         message = (
                             "Native file inputs request failed. "
@@ -3494,11 +3506,23 @@ async def generate_chat_completion(
                         content = msg.get("content") or ""
                         reasoning_content = msg.get("reasoning_content") or ""
                         tool_calls = msg.get("tool_calls")
+                        annotations = msg.get("annotations")
+                        sources = cc.get("sources")
+                        if sources:
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {"sources": sources}, ensure_ascii=False
+                                )
+                                + "\n\n"
+                            )
                         delta = {}
                         if content:
                             delta["content"] = content
                         if reasoning_content:
                             delta["reasoning_content"] = reasoning_content
+                        if annotations:
+                            delta["annotations"] = annotations
                         if tool_calls:
                             delta["tool_calls"] = tool_calls
                         yield (

@@ -10,6 +10,95 @@ RESPONSES_COMPATIBILITY_MODES = {"standard", "sub2api", "custom"}
 SUB2API_DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
 
 
+def normalize_url_citation(annotation: Any) -> Optional[dict]:
+    """Normalize official and compatibility-gateway URL citation shapes."""
+    if not isinstance(annotation, dict):
+        return None
+
+    nested = annotation.get("url_citation")
+    if not isinstance(nested, dict) and annotation.get("type") != "url_citation":
+        return None
+    candidate = nested if isinstance(nested, dict) else annotation
+    url = str(candidate.get("url") or candidate.get("link") or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return None
+
+    title = str(candidate.get("title") or candidate.get("name") or url).strip()
+    normalized = {
+        "type": "url_citation",
+        "url": url,
+        "title": title or url,
+    }
+    for key in ("start_index", "end_index"):
+        value = candidate.get(key)
+        if isinstance(value, int) and value >= 0:
+            normalized[key] = value
+
+    return normalized
+
+
+def normalize_url_citations(value: Any) -> list[dict]:
+    """Return deduplicated normalized URL citations in upstream order."""
+    values = value if isinstance(value, list) else [value]
+    citations: list[dict] = []
+    seen: set[str] = set()
+    for value_item in values:
+        citation = normalize_url_citation(value_item)
+        if not citation:
+            continue
+        key = citation["url"]
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(citation)
+    return citations
+
+
+def url_citation_to_source(citation: dict) -> dict:
+    """Convert a normalized URL citation into HaloWebUI's source shape."""
+    url = citation["url"]
+    title = citation.get("title") or url
+    metadata = {"source": f"web:{url}", "name": title, "url": url}
+    return {
+        "source": {"id": url, "name": title, "type": "url", "url": url},
+        "document": [title],
+        "metadata": [metadata],
+    }
+
+
+def url_citation_to_chat_annotation(citation: dict) -> dict:
+    """Convert a normalized citation to Chat Completions annotation shape."""
+    citation_payload = {
+        key: citation[key]
+        for key in ("url", "title", "start_index", "end_index")
+        if key in citation
+    }
+    return {"type": "url_citation", "url_citation": citation_payload}
+
+
+def extract_response_url_citations(responses_data: Dict[str, Any]) -> list[dict]:
+    """Extract URL citations from final Responses output content."""
+    citations: list[dict] = []
+    output = responses_data.get("output", []) or []
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in item.get("content", []) or []:
+                if isinstance(part, dict):
+                    citations.extend(normalize_url_citations(part.get("annotations")))
+
+    citations.extend(normalize_url_citations(responses_data.get("annotations")))
+    result: list[dict] = []
+    seen: set[str] = set()
+    for citation in citations:
+        key = citation["url"]
+        if key not in seen:
+            seen.add(key)
+            result.append(citation)
+    return result
+
+
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -626,6 +715,7 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
     reasoning_content = ""
     tool_calls: List[dict] = []
     tool_call_index = 0
+    citations = extract_response_url_citations(responses_data)
 
     for item in output:
         if not isinstance(item, dict):
@@ -675,6 +765,11 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
                     "role": "assistant",
                     "content": content,
                     **(
+                        {"annotations": [url_citation_to_chat_annotation(citation) for citation in citations]}
+                        if citations
+                        else {}
+                    ),
+                    **(
                         {"reasoning_content": reasoning_content}
                         if reasoning_content
                         else {}
@@ -685,6 +780,7 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
             }
         ],
         "usage": responses_data.get("usage", {}) or {},
+        **({"sources": [url_citation_to_source(citation) for citation in citations]} if citations else {}),
     }
 
 
@@ -845,6 +941,7 @@ async def responses_events_to_chat_completions_sse(
     saw_text_content = False
     saw_reasoning_content = False
     reasoning_delta_seen: set[str] = set()
+    emitted_url_citations: set[str] = set()
 
     def _tool_state(stable_id: str, idx: int) -> Dict[str, Any]:
         st = tool_state_by_id.get(stable_id)
@@ -961,6 +1058,16 @@ async def responses_events_to_chat_completions_sse(
             return "reasoning_text"
         return "reasoning"
 
+    def _new_url_citation_annotations(value: Any) -> list[dict]:
+        citations = []
+        for citation in normalize_url_citations(value):
+            key = citation["url"]
+            if key in emitted_url_citations:
+                continue
+            emitted_url_citations.add(key)
+            citations.append(url_citation_to_chat_annotation(citation))
+        return citations
+
     def _extract_reasoning_event_text(event_obj: dict) -> str:
         for key in ("delta", "text", "part", "summary", "content", "item", "reasoning"):
             text = _stringify_reasoning_content(event_obj.get(key))
@@ -992,19 +1099,26 @@ async def responses_events_to_chat_completions_sse(
         if event_type == "response.output_text.delta":
             delta = event.get("delta", "")
             delta_text = ""
-            annotations = None
+            annotations = []
             if isinstance(delta, str):
                 delta_text = delta
             elif isinstance(delta, dict):
                 delta_text = delta.get("text") or delta.get("content") or ""
                 ann = delta.get("annotations")
-                if isinstance(ann, list) and ann:
-                    annotations = ann
+                annotations = _new_url_citation_annotations(ann)
             if delta_text or annotations:
                 saw_content = True
                 if delta_text:
                     saw_text_content = True
-                yield f"data: {json.dumps(make_chunk(delta_content=delta_text, delta_annotations=annotations), ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(make_chunk(delta_content=delta_text, delta_annotations=annotations or None), ensure_ascii=False)}\n\n"
+            continue
+
+        # OpenAI emits URL citations as separate events after text deltas.
+        if event_type == "response.output_text.annotation.added":
+            annotations = _new_url_citation_annotations(event.get("annotation"))
+            if annotations:
+                saw_content = True
+                yield f"data: {json.dumps(make_chunk(delta_annotations=annotations), ensure_ascii=False)}\n\n"
             continue
 
         # Some providers emit a full text at the end instead of deltas.
@@ -1180,9 +1294,18 @@ async def responses_events_to_chat_completions_sse(
 
         if event_type in ("response.completed", "response.done"):
             # Diagnostic: log output items in the final response
+            completed_response = event.get("response")
+            if isinstance(completed_response, dict):
+                final_annotations = _new_url_citation_annotations(
+                    extract_response_url_citations(completed_response)
+                )
+                if final_annotations:
+                    saw_content = True
+                    yield f"data: {json.dumps(make_chunk(delta_annotations=final_annotations), ensure_ascii=False)}\n\n"
+
             completed_reasoning_texts: List[str] = []
-            if isinstance(event.get("response"), dict):
-                resp_obj = event["response"]
+            if isinstance(completed_response, dict):
+                resp_obj = completed_response
                 output_items = resp_obj.get("output", [])
                 if isinstance(output_items, list):
                     for oi_idx, oi in enumerate(output_items):

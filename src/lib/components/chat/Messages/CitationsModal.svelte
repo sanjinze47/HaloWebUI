@@ -8,14 +8,19 @@
 	import { decodeString, getTextFragmentUrl } from '$lib/utils/marked/citation-extension';
 	import Markdown from './Markdown.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let show = false;
-	export let citation;
+	export let citation: Record<string, any> | null = null;
 	export let showPercentage = false;
 	export let showRelevance = true;
 
-	let mergedDocuments = [];
+	let mergedDocuments: Array<{
+		source?: Record<string, any>;
+		document: string;
+		metadata: Record<string, any>;
+		distance?: number;
+	}> = [];
 
 	function calculatePercentage(distance: number) {
 		if (typeof distance !== 'number') return null;
@@ -39,7 +44,7 @@
 			return {
 				source: citation.source,
 				document: typeof document === 'string' ? document : `${document ?? ''}`,
-				metadata,
+				metadata: metadata ?? {},
 				distance
 			};
 		});
@@ -87,6 +92,7 @@
 								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
 								href={getSourceUrl(firstDoc)}
 								target="_blank"
+								rel="noopener noreferrer nofollow"
 							>
 								{decodeString(citation?.source?.name)}
 							</a>
@@ -134,6 +140,7 @@
 										<a
 											href={snippetUrl}
 											target="_blank"
+											rel="noopener noreferrer nofollow"
 											class="underline hover:text-gray-500 dark:hover:text-gray-100"
 										>
 											{$i18n.t('Content')}

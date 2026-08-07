@@ -158,7 +158,7 @@
 					type?: string;
 					[key: string]: unknown;
 			  };
-		sources?: string[];
+		sources?: Record<string, any>[];
 		followUps?: string[];
 		code_executions?: {
 			uuid: string;
@@ -1692,7 +1692,7 @@
 
 									<div class="message-outline-toolbar-row flex items-end mt-2 gap-3 flex-wrap">
 						{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
-							<div class="flex shrink-0 items-center gap-2">
+							<div class="flex w-full flex-wrap items-center gap-2">
 								<Tooltip
 									content={($settings?.showInlineCitations ?? true)
 										? tr('隐藏正文引用标签', 'Hide inline citations')

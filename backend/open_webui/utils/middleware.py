@@ -114,6 +114,10 @@ from open_webui.utils.native_web_search import (
     resolve_effective_native_web_search_support,
     strip_model_prefix,
 )
+from open_webui.utils.openai_responses import (
+    normalize_url_citations,
+    url_citation_to_source,
+)
 from open_webui.utils.model_identity import (
     get_model_ref_from_model,
     resolve_model_from_lookup,
@@ -6977,6 +6981,30 @@ async def process_chat_response(
                                     )
 
                                 if not choices:
+                                    # Non-stream Responses responses can be wrapped in
+                                    # a one-shot SSE event carrying sources at the top level.
+                                    # Preserve those sources before handling errors/usage.
+                                    top_level_sources = data.get("sources")
+                                    if isinstance(top_level_sources, list):
+                                        for source in top_level_sources:
+                                            if not isinstance(source, dict):
+                                                continue
+                                            source_info = source.get("source")
+                                            if not isinstance(source_info, dict):
+                                                source_info = {}
+                                            source_url = str(
+                                                source_info.get("url")
+                                                or source_info.get("id")
+                                                or ""
+                                            ).strip()
+                                            if source_url and source_url in emitted_url_citations:
+                                                continue
+                                            if source_url:
+                                                emitted_url_citations.add(source_url)
+                                            await event_emitter(
+                                                {"type": "source", "data": source}
+                                            )
+
                                     error = data.get("error", {})
                                     if error:
                                         _stream_api_error = error
@@ -7027,48 +7055,16 @@ async def process_chat_response(
                                 # URL citations (OpenAI-style delta annotations).
                                 annotations = delta.get("annotations")
                                 if isinstance(annotations, list) and annotations:
-                                    for annotation in annotations:
-                                        if not isinstance(annotation, dict):
+                                    for citation in normalize_url_citations(annotations):
+                                        url = citation["url"]
+                                        dedupe_key = url
+                                        if dedupe_key in emitted_url_citations:
                                             continue
-                                        if annotation.get(
-                                            "type"
-                                        ) == "url_citation" and isinstance(
-                                            annotation.get("url_citation"), dict
-                                        ):
-                                            url_citation = (
-                                                annotation.get("url_citation") or {}
-                                            )
-                                            url = str(
-                                                url_citation.get("url") or ""
-                                            ).strip()
-                                            if not url:
-                                                continue
-                                            title = str(
-                                                url_citation.get("title") or url
-                                            ).strip()
-                                            dedupe_key = url
-                                            if dedupe_key in emitted_url_citations:
-                                                continue
-                                            emitted_url_citations.add(dedupe_key)
-                                            source = {
-                                                "source": {
-                                                    "id": url,
-                                                    "name": title or url,
-                                                    "type": "url",
-                                                    "url": url,
-                                                },
-                                                "document": [title or url],
-                                                "metadata": [
-                                                    {
-                                                        "source": f"web:{url}",
-                                                        "name": title or url,
-                                                        "url": url,
-                                                    }
-                                                ],
-                                            }
-                                            await event_emitter(
-                                                {"type": "source", "data": source}
-                                            )
+                                        emitted_url_citations.add(dedupe_key)
+                                        source = url_citation_to_source(citation)
+                                        await event_emitter(
+                                            {"type": "source", "data": source}
+                                        )
 
                                 if delta_tool_calls:
                                     for pos, delta_tool_call in enumerate(

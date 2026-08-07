@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-07
+
+### Fixed
+
+- Fixed Sub2API Responses native web search requests by using `web_search` in Sub2API compatibility mode.
+- Preserved the official OpenAI `web_search_preview` behavior for standard Responses connections.
+- Added parsing for direct and nested Responses URL citations, including independent annotation events and final response annotations.
+- Added deduplicated OpenAI-style source cards with domain, favicon fallback, citation details, and safe external links.
+
 ## [0.2.1] - 2026-08-07
 
 ### Fixed

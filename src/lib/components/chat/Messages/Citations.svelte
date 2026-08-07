@@ -9,12 +9,20 @@
 	import { getCitationEntries } from '$lib/utils/citations';
 	import { getDisplayTitle, decodeString } from '$lib/utils/marked/citation-extension';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
+
+	type Citation = {
+		id: string;
+		source?: Record<string, any>;
+		document: string[];
+		metadata: any[];
+		distances: number[];
+	};
 
 	export let id = '';
-	export let sources = [];
+	export let sources: Record<string, any>[] = [];
 
-	let citations = [];
+	let citations: Citation[] = [];
 	let showPercentage = false;
 	let showRelevance = true;
 
@@ -24,6 +32,7 @@
 
 	let buttonEl: HTMLElement;
 	let openAbove = false;
+	let faviconFailures: Record<string, boolean> = {};
 
 	function calculateShowRelevance(sources: any[]) {
 		const distances = sources.flatMap((citation) => citation.distances ?? []);
@@ -59,8 +68,35 @@
 		);
 	}
 
+	function getSourceUrl(citation: any): string {
+		const url = citation?.source?.url ?? citation?.id ?? '';
+		return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '';
+	}
+
+	function getSourceDomain(citation: any): string {
+		const url = getSourceUrl(citation);
+		if (!url) return '';
+
+		try {
+			return new URL(url).hostname.replace(/^www\./i, '');
+		} catch {
+			return '';
+		}
+	}
+
+	function getFaviconUrl(citation: any): string {
+		const domain = getSourceDomain(citation);
+		return domain
+			? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
+			: '';
+	}
+
+	function hideFavicon(citationId: string) {
+		faviconFailures = { ...faviconFailures, [citationId]: true };
+	}
+
 	$: {
-		citations = sources.reduce((acc, source) => {
+		citations = sources.reduce<Citation[]>((acc, source) => {
 			if (!source || typeof source !== 'object' || Object.keys(source).length === 0) {
 				return acc;
 			}
@@ -144,7 +180,7 @@
 
 {#if citations.length > 0}
 	{@const hasWebCitations = citations.some((c) => isWebCitation(c))}
-	<div class="-mx-0.5 relative">
+	<div class="-mx-0.5 relative flex w-full flex-wrap items-center gap-2">
 		<!-- Compact pill button -->
 		<button
 			bind:this={buttonEl}
@@ -179,6 +215,49 @@
 				<ChevronDown strokeWidth="3.5" className="size-3.5" />
 			</div>
 		</button>
+
+		<!-- OpenAI-style source cards -->
+		<div class="flex w-full gap-2 overflow-x-auto pb-0.5 scrollbar-none">
+			{#each citations.slice(0, 8) as citation, idx}
+				{@const sourceUrl = getSourceUrl(citation)}
+				{@const domain = getSourceDomain(citation)}
+				{@const faviconUrl = getFaviconUrl(citation)}
+				<button
+					class="flex min-w-[190px] max-w-[260px] flex-1 items-center gap-2 rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-left transition hover:border-gray-300 hover:bg-white dark:border-gray-700/70 dark:bg-gray-900/70 dark:hover:border-gray-600 dark:hover:bg-gray-800"
+					title={sourceUrl || getDisplayTitle(decodeString(citation.source?.name ?? ''), 80, 40, 20)}
+					on:click={() => {
+						showCitationModal = true;
+						selectedCitation = citation;
+					}}
+				>
+					<span class="flex size-7 shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-800">
+						{#if faviconUrl && !faviconFailures[citation.id]}
+							<img
+								src={faviconUrl}
+								alt=""
+								class="size-4 rounded-sm"
+								on:error={() => hideFavicon(citation.id)}
+							/>
+						{:else}
+							<GlobeAlt className="size-4 text-gray-500" strokeWidth="1.8" />
+						{/if}
+					</span>
+					<span class="min-w-0 flex-1">
+						<span class="block truncate text-xs font-medium text-gray-700 dark:text-gray-200">
+							{getDisplayTitle(decodeString(citation.source?.name ?? ''), 64, 36, 18)}
+						</span>
+						{#if domain}
+							<span class="mt-0.5 block truncate text-[11px] text-gray-500 dark:text-gray-400">
+								{domain}
+							</span>
+						{/if}
+					</span>
+					<span class="shrink-0 text-[10px] font-medium text-gray-400 dark:text-gray-500">
+						[{idx + 1}]
+					</span>
+				</button>
+			{/each}
+		</div>
 
 		<!-- Expanded source list -->
 		{#if showCitations}

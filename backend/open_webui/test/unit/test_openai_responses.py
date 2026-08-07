@@ -12,6 +12,7 @@ if str(_BACKEND_DIR) not in sys.path:
 from open_webui.utils.openai_responses import (
     convert_chat_completions_to_responses_payload,
     convert_responses_to_chat_completions,
+    normalize_url_citations,
     iter_responses_events,
     responses_events_to_chat_completions_sse,
 )
@@ -114,6 +115,71 @@ def test_convert_responses_to_chat_completions_basic():
     assert cc["id"] == "resp_1"
     assert cc["choices"][0]["message"]["content"] == "Hello"
     assert cc["usage"]["output_tokens"] == 1
+
+
+def test_normalize_url_citations_supports_official_and_nested_shapes():
+    citations = normalize_url_citations(
+        [
+            {
+                "type": "url_citation",
+                "url": "https://example.com/article",
+                "title": "Example article",
+                "start_index": 3,
+                "end_index": 10,
+            },
+            {
+                "type": "url_citation",
+                "url_citation": {
+                    "url": "https://example.com/article",
+                    "title": "Example article",
+                    "start_index": 20,
+                    "end_index": 30,
+                },
+            },
+            {"type": "url_citation", "title": "Missing URL"},
+        ]
+    )
+
+    assert citations == [
+        {
+            "type": "url_citation",
+            "url": "https://example.com/article",
+            "title": "Example article",
+            "start_index": 3,
+            "end_index": 10,
+        }
+    ]
+
+
+def test_convert_responses_to_chat_completions_preserves_url_citations_and_sources():
+    responses = {
+        "id": "resp_citation",
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "A sourced answer",
+                        "annotations": [
+                            {
+                                "type": "url_citation",
+                                "url": "https://example.com/article",
+                                "title": "Example article",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    cc = convert_responses_to_chat_completions(responses, model_id="gpt-test")
+    annotation = cc["choices"][0]["message"]["annotations"][0]
+
+    assert annotation["type"] == "url_citation"
+    assert annotation["url_citation"]["url"] == "https://example.com/article"
+    assert cc["sources"][0]["source"]["name"] == "Example article"
 
 
 def test_convert_chat_completions_to_responses_payload_injects_native_web_search_tool():
@@ -275,6 +341,87 @@ def test_responses_events_to_chat_sse_text_and_done():
     lines = asyncio.run(run())
     assert any('"content": "Hello"' in line for line in lines)
     assert lines[-1].strip() == "data: [DONE]"
+
+
+def test_responses_events_to_chat_sse_emits_annotation_added_event_once():
+    citation = {
+        "type": "url_citation",
+        "url": "https://example.com/article",
+        "title": "Example article",
+        "start_index": 0,
+        "end_index": 5,
+    }
+    events = [
+        {"type": "response.output_text.delta", "delta": "Hello"},
+        {"type": "response.output_text.annotation.added", "annotation": citation},
+        {"type": "response.output_text.annotation.added", "annotation": citation},
+        {"type": "response.completed", "response": {"output": []}},
+    ]
+
+    async def run():
+        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        return await _collect_async(sse)
+
+    lines = asyncio.run(run())
+    annotation_lines = [line for line in lines if '"annotations"' in line]
+
+    assert len(annotation_lines) == 1
+    assert '"url": "https://example.com/article"' in annotation_lines[0]
+
+
+def test_responses_events_to_chat_sse_deduplicates_same_url_at_different_offsets():
+    events = [
+        {
+            "type": "response.output_text.annotation.added",
+            "annotation": {
+                "type": "url_citation",
+                "url": "https://example.com/article",
+                "title": "Example article",
+                "start_index": 0,
+                "end_index": 5,
+            },
+        },
+        {
+            "type": "response.output_text.annotation.added",
+            "annotation": {
+                "type": "url_citation",
+                "url": "https://example.com/article",
+                "title": "Example article",
+                "start_index": 10,
+                "end_index": 15,
+            },
+        },
+        {"type": "response.completed"},
+    ]
+
+    async def run():
+        sse = responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        return await _collect_async(sse)
+
+    lines = asyncio.run(run())
+    annotation_lines = [line for line in lines if '"annotations"' in line]
+    assert len(annotation_lines) == 1
+
+
+def test_convert_responses_to_chat_completions_ignores_citations_without_url():
+    responses = {
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "No source",
+                        "annotations": [{"type": "url_citation", "title": "Missing URL"}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    cc = convert_responses_to_chat_completions(responses, model_id="gpt-test")
+    assert "annotations" not in cc["choices"][0]["message"]
+    assert "sources" not in cc
 
 
 def test_convert_responses_to_chat_completions_preserves_reasoning_summary():
