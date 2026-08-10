@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { getCitationEntries } from './citations';
+import {
+	getCitationDomain,
+	getCitationEntries,
+	getCitationFaviconUrl,
+	getCitationSourceUrl,
+	normalizeCitationUrl
+} from './citations';
 
 describe('citation source normalization', () => {
 	it('keeps source order and metadata needed by citation markers', () => {
@@ -32,5 +38,33 @@ describe('citation source normalization', () => {
 		});
 
 		expect(entries[0].document).toBe('A short excerpt');
+	});
+
+	it('normalizes direct and provider-prefixed citation URLs', () => {
+		expect(normalizeCitationUrl('https://example.com/article')).toBe('https://example.com/article');
+		expect(normalizeCitationUrl('web:https://example.com/article')).toBe(
+			'https://example.com/article'
+		);
+		expect(normalizeCitationUrl('source (https://example.com/article).')).toBe(
+			'https://example.com/article'
+		);
+	});
+
+	it('prefers source metadata for external link and favicon details', () => {
+		const citation = {
+			id: 'web:https://fallback.example/article',
+			metadata: { url: 'https://docs.example/reference' },
+			source: { id: 'provider-source-1', name: 'Reference' }
+		};
+
+		expect(getCitationSourceUrl(citation)).toBe('https://docs.example/reference');
+		expect(getCitationDomain(citation)).toBe('docs.example');
+		expect(getCitationFaviconUrl(citation)).toContain('domain=docs.example');
+	});
+
+	it('does not turn file IDs or arbitrary text into external links', () => {
+		expect(getCitationSourceUrl({ id: 'file-123', source: { name: 'Local file' } })).toBe('');
+		expect(getCitationDomain('not a URL')).toBe('');
+		expect(getCitationFaviconUrl({ id: 'file-123' })).toBe('');
 	});
 });

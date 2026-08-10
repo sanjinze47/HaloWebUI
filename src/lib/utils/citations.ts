@@ -10,6 +10,50 @@ const normalizeCitationList = (value: unknown): any[] => {
 	return [value];
 };
 
+const HTTP_URL_PATTERN = /^https?:\/\//i;
+
+export const normalizeCitationUrl = (value: unknown): string => {
+	const text = String(value ?? '').trim();
+	if (!text) return '';
+	if (HTTP_URL_PATTERN.test(text)) return text;
+
+	const embedded = text.match(/https?:\/\/[^\s<>"']+/i)?.[0] ?? '';
+	return embedded.replace(/[),.;]+$/, '');
+};
+
+export const getCitationSourceUrl = (citation: any): string => {
+	const metadata = Array.isArray(citation?.metadata) ? citation.metadata[0] : citation?.metadata;
+	const candidates = [citation?.source?.url, metadata?.url, citation?.source?.id, citation?.id];
+
+	for (const candidate of candidates) {
+		const url = normalizeCitationUrl(candidate);
+		if (url) return url;
+	}
+
+	return '';
+};
+
+export const getCitationDomain = (citationOrUrl: any): string => {
+	const url =
+		typeof citationOrUrl === 'string'
+			? normalizeCitationUrl(citationOrUrl)
+			: getCitationSourceUrl(citationOrUrl);
+	if (!url) return '';
+
+	try {
+		return new URL(url).hostname.replace(/^www\./i, '');
+	} catch {
+		return '';
+	}
+};
+
+export const getCitationFaviconUrl = (citation: any): string => {
+	const domain = getCitationDomain(citation);
+	return domain
+		? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
+		: '';
+};
+
 export const getCitationDocuments = (citation: any): any[] => {
 	return normalizeCitationList(citation?.document ?? citation?.documents);
 };

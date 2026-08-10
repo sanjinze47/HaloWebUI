@@ -1,15 +1,22 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { slide } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
+	import { Eye, EyeOff } from 'lucide-svelte';
 	import CitationsModal from './CitationsModal.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import { getCitationEntries } from '$lib/utils/citations';
+	import {
+		getCitationDomain,
+		getCitationEntries,
+		getCitationFaviconUrl,
+		getCitationSourceUrl
+	} from '$lib/utils/citations';
 	import { getDisplayTitle, decodeString } from '$lib/utils/marked/citation-extension';
+	import { translateWithDefault } from '$lib/i18n';
 
 	const i18n: any = getContext('i18n');
+	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
+		translateWithDefault($i18n, key, defaultValue, options);
 
 	type Citation = {
 		id: string;
@@ -21,28 +28,22 @@
 
 	export let id = '';
 	export let sources: Record<string, any>[] = [];
+	export let inlineCitationsVisible = true;
+	export let onToggleInlineCitations: (() => void) | null = null;
 
 	let citations: Citation[] = [];
 	let showPercentage = false;
 	let showRelevance = true;
-
-	let showCitationModal = false;
-	let selectedCitation: any = null;
-	let showCitations = false;
-
-	let buttonEl: HTMLElement;
-	let openAbove = false;
+	let showCitationDrawer = false;
+	let selectedCitation: Citation | null = null;
 	let faviconFailures: Record<string, boolean> = {};
 
-	function calculateShowRelevance(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
+	function calculateShowRelevance(items: any[]) {
+		const distances = items.flatMap((citation) => citation.distances ?? []);
 		const inRange = distances.filter((d) => d !== undefined && d >= -1 && d <= 1).length;
 		const outOfRange = distances.filter((d) => d !== undefined && (d < -1 || d > 1)).length;
 
-		if (distances.length === 0) {
-			return false;
-		}
-
+		if (distances.length === 0) return false;
 		if (
 			(inRange === distances.length - 1 && outOfRange === 1) ||
 			(outOfRange === distances.length - 1 && inRange === 1)
@@ -53,46 +54,37 @@
 		return true;
 	}
 
-	function shouldShowPercentage(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
+	function shouldShowPercentage(items: any[]) {
+		const distances = items.flatMap((citation) => citation.distances ?? []);
 		return distances.every((d) => d !== undefined && d >= -1 && d <= 1);
 	}
 
-	function isWebCitation(citation: any): boolean {
-		return (
-			citation.id?.startsWith('http://') ||
-			citation.id?.startsWith('https://') ||
-			citation.source?.url?.includes('http') ||
-			citation.source?.name?.startsWith('http://') ||
-			citation.source?.name?.startsWith('https://')
+	function isWebCitation(citation: Citation): boolean {
+		return Boolean(getCitationSourceUrl(citation));
+	}
+
+	function getCitationTitle(citation: Citation, limit = 64): string {
+		return getDisplayTitle(
+			decodeString(citation.source?.name ?? citation.source?.title ?? citation.id ?? ''),
+			limit,
+			36,
+			18
 		);
-	}
-
-	function getSourceUrl(citation: any): string {
-		const url = citation?.source?.url ?? citation?.id ?? '';
-		return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '';
-	}
-
-	function getSourceDomain(citation: any): string {
-		const url = getSourceUrl(citation);
-		if (!url) return '';
-
-		try {
-			return new URL(url).hostname.replace(/^www\./i, '');
-		} catch {
-			return '';
-		}
-	}
-
-	function getFaviconUrl(citation: any): string {
-		const domain = getSourceDomain(citation);
-		return domain
-			? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
-			: '';
 	}
 
 	function hideFavicon(citationId: string) {
 		faviconFailures = { ...faviconFailures, [citationId]: true };
+	}
+
+	function openCitation(citation: Citation) {
+		selectedCitation = citation;
+		showCitationDrawer = true;
+	}
+
+	function openAllCitations() {
+		if (citations.length > 0) {
+			openCitation(selectedCitation ?? citations[0]);
+		}
 	}
 
 	$: {
@@ -103,28 +95,30 @@
 
 			getCitationEntries(source).forEach(({ document, metadata, distance }) => {
 				const documentText = typeof document === 'string' ? document : `${document ?? ''}`;
+				const sourceRecord =
+					source.source && typeof source.source === 'object' ? { ...source.source } : {};
+				const sourceId = String(metadata?.source ?? sourceRecord.id ?? source.id ?? 'N/A');
+				const metadataUrl = metadata?.url ?? metadata?.link ?? '';
+				const sourceUrl = getCitationSourceUrl({
+					id: sourceId,
+					metadata: { url: metadataUrl },
+					source: sourceRecord
+				});
 
-				const id = metadata?.source ?? source?.source?.id ?? 'N/A';
-				let _source = source?.source;
+				if (metadata?.name) sourceRecord.name = metadata.name;
+				if (metadataUrl && !sourceRecord.url) sourceRecord.url = metadataUrl;
+				if (sourceUrl && !sourceRecord.url) sourceRecord.url = sourceUrl;
+				if (sourceUrl && !sourceRecord.name) sourceRecord.name = sourceUrl;
 
-				if (metadata?.name) {
-					_source = { ..._source, name: metadata.name };
-				}
-
-				if (id.startsWith('http://') || id.startsWith('https://')) {
-					_source = { ..._source, name: id, url: id };
-				}
-
-				const existingSource = acc.find((item) => item.id === id);
-
+				const existingSource = acc.find((item) => item.id === sourceId);
 				if (existingSource) {
 					existingSource.document.push(documentText);
 					existingSource.metadata.push(metadata);
 					if (distance !== undefined) existingSource.distances.push(distance);
 				} else {
 					acc.push({
-						id: id,
-						source: _source,
+						id: sourceId,
+						source: sourceRecord,
 						document: [documentText],
 						metadata: metadata ? [metadata] : [],
 						distances: distance !== undefined ? [distance] : []
@@ -137,100 +131,112 @@
 
 		showRelevance = calculateShowRelevance(citations);
 		showPercentage = shouldShowPercentage(citations);
+		if (selectedCitation && !citations.some((citation) => citation.id === selectedCitation?.id)) {
+			selectedCitation = citations[0] ?? null;
+		}
 	}
 
-	function normalizeCitationIndex(indexOrIdentifier: number | string | null | undefined): number | null {
+	function normalizeCitationIndex(
+		indexOrIdentifier: number | string | null | undefined
+	): number | null {
 		if (typeof indexOrIdentifier === 'number' && Number.isInteger(indexOrIdentifier)) {
 			return indexOrIdentifier;
 		}
 
 		if (typeof indexOrIdentifier === 'string') {
 			const match = indexOrIdentifier.match(/^(\d+)/);
-			if (match) {
-				return Number.parseInt(match[1], 10);
-			}
+			if (match) return Number.parseInt(match[1], 10);
 		}
 
 		return null;
 	}
 
-	export function openCitationByIndex(indexOrIdentifier: number | string | null | undefined): boolean {
+	export function openCitationByIndex(
+		indexOrIdentifier: number | string | null | undefined
+	): boolean {
 		const index = normalizeCitationIndex(indexOrIdentifier);
-		if (index === null || index < 1) {
-			return false;
-		}
+		if (index === null || index < 1) return false;
 
 		const citation = citations[index - 1];
-		if (!citation) {
-			return false;
-		}
+		if (!citation) return false;
 
-		selectedCitation = citation;
-		showCitationModal = true;
+		openCitation(citation);
 		return true;
 	}
 </script>
 
 <CitationsModal
-	bind:show={showCitationModal}
+	bind:show={showCitationDrawer}
 	citation={selectedCitation}
+	{citations}
 	{showPercentage}
 	{showRelevance}
 />
 
 {#if citations.length > 0}
-	{@const hasWebCitations = citations.some((c) => isWebCitation(c))}
-	<div class="-mx-0.5 relative flex w-full flex-wrap items-center gap-2">
-		<!-- Compact pill button -->
-		<button
-			bind:this={buttonEl}
-			class="text-xs font-medium text-gray-600 dark:text-gray-300 px-3 rounded-xl
-				bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl
-				hover:bg-white/80 dark:hover:bg-gray-700/60 transition-all duration-200
-				flex items-center gap-1.5
-				border border-gray-200/50 dark:border-gray-700/50"
-			style="height: 36px;"
-			on:click={() => {
-				if (!showCitations && buttonEl) {
-					const rect = buttonEl.getBoundingClientRect();
-					const spaceBelow = window.innerHeight - rect.bottom;
-					openAbove = spaceBelow < 260;
-				}
-				showCitations = !showCitations;
-			}}
-		>
-			{#if hasWebCitations}
-				<GlobeAlt className="size-4 shrink-0" strokeWidth="2" />
-			{:else}
-				<Document className="size-4 shrink-0" strokeWidth="2" />
-			{/if}
-			<span class="translate-y-px">
-				{#if citations.length === 1}
-					{$i18n.t('1 Source')}
-				{:else}
-					{$i18n.t('{{COUNT}} Sources', { COUNT: citations.length })}
+	{@const hasWebCitations = citations.some(isWebCitation)}
+	<div class="-mx-0.5 mt-1.5 w-full">
+		<div class="flex min-h-[30px] items-center justify-between gap-3 text-xs">
+			<div class="flex min-w-0 items-center gap-2">
+				{#if onToggleInlineCitations}
+					<Tooltip
+						content={inlineCitationsVisible
+							? tr('隐藏正文引用标签', 'Hide inline citations')
+							: tr('显示正文引用标签', 'Show inline citations')}
+						placement="bottom"
+					>
+						<button
+							type="button"
+							class="flex size-6 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/5 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-200"
+							aria-label={inlineCitationsVisible
+								? tr('隐藏正文引用标签', 'Hide inline citations')
+								: tr('显示正文引用标签', 'Show inline citations')}
+							on:click={onToggleInlineCitations}
+						>
+							{#if inlineCitationsVisible}
+								<EyeOff className="size-3.5" strokeWidth={2.1} />
+							{:else}
+								<Eye className="size-3.5" strokeWidth={2.1} />
+							{/if}
+						</button>
+					</Tooltip>
 				{/if}
-			</span>
-			<div class="shrink-0 transition-transform duration-200" class:rotate-180={showCitations}>
-				<ChevronDown strokeWidth="3.5" className="size-3.5" />
+				<div class="flex min-w-0 items-center gap-1.5 font-medium text-gray-500 dark:text-gray-400">
+					{#if hasWebCitations}
+						<GlobeAlt className="size-3.5 shrink-0" strokeWidth="1.9" />
+					{:else}
+						<Document className="size-3.5 shrink-0" strokeWidth="1.9" />
+					{/if}
+					<span>{tr('来源', 'Sources')}</span>
+					<span class="text-gray-400 dark:text-gray-500">{citations.length}</span>
+				</div>
 			</div>
-		</button>
+			<button
+				type="button"
+				class="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-black/5 dark:text-blue-400 dark:hover:bg-white/5"
+				on:click={openAllCitations}
+			>
+				{tr('查看全部', 'View all')}
+			</button>
+		</div>
 
-		<!-- OpenAI-style source cards -->
-		<div class="flex w-full gap-2 overflow-x-auto pb-0.5 scrollbar-none">
+		<div
+			class="flex w-full overflow-x-auto border-y border-black/5 scrollbar-none dark:border-white/5"
+		>
 			{#each citations.slice(0, 8) as citation, idx}
-				{@const sourceUrl = getSourceUrl(citation)}
-				{@const domain = getSourceDomain(citation)}
-				{@const faviconUrl = getFaviconUrl(citation)}
+				{@const sourceUrl = getCitationSourceUrl(citation)}
+				{@const domain = getCitationDomain(citation)}
+				{@const faviconUrl = getCitationFaviconUrl(citation)}
 				<button
-					class="flex min-w-[190px] max-w-[260px] flex-1 items-center gap-2 rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-left transition hover:border-gray-300 hover:bg-white dark:border-gray-700/70 dark:bg-gray-900/70 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-					title={sourceUrl || getDisplayTitle(decodeString(citation.source?.name ?? ''), 80, 40, 20)}
-					on:click={() => {
-						showCitationModal = true;
-						selectedCitation = citation;
-					}}
+					type="button"
+					id={`source-${id}-${idx + 1}`}
+					class="group flex min-w-[168px] max-w-[230px] flex-1 shrink-0 items-center gap-2 border-r border-black/5 px-2.5 py-2 text-left transition hover:bg-black/[0.035] dark:border-white/5 dark:hover:bg-white/[0.035] first:pl-0"
+					title={sourceUrl || getCitationTitle(citation, 80)}
+					on:click={() => openCitation(citation)}
 				>
-					<span class="flex size-7 shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-800">
+					<span
+						class="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800"
+					>
 						{#if faviconUrl && !faviconFailures[citation.id]}
 							<img
 								src={faviconUrl}
@@ -238,68 +244,35 @@
 								class="size-4 rounded-sm"
 								on:error={() => hideFavicon(citation.id)}
 							/>
+						{:else if isWebCitation(citation)}
+							<GlobeAlt className="size-3.5 text-gray-400 dark:text-gray-500" strokeWidth="1.8" />
 						{:else}
-							<GlobeAlt className="size-4 text-gray-500" strokeWidth="1.8" />
+							<Document className="size-3.5 text-gray-400 dark:text-gray-500" strokeWidth="1.8" />
 						{/if}
 					</span>
 					<span class="min-w-0 flex-1">
-						<span class="block truncate text-xs font-medium text-gray-700 dark:text-gray-200">
-							{getDisplayTitle(decodeString(citation.source?.name ?? ''), 64, 36, 18)}
+						<span
+							class="block truncate text-[11px] font-medium text-gray-700 group-hover:text-gray-950 dark:text-gray-200 dark:group-hover:text-white"
+						>
+							{idx + 1}. {getCitationTitle(citation)}
 						</span>
 						{#if domain}
-							<span class="mt-0.5 block truncate text-[11px] text-gray-500 dark:text-gray-400">
+							<span class="mt-0.5 block truncate text-[10px] text-gray-400 dark:text-gray-500">
 								{domain}
 							</span>
 						{/if}
 					</span>
-					<span class="shrink-0 text-[10px] font-medium text-gray-400 dark:text-gray-500">
-						[{idx + 1}]
-					</span>
 				</button>
 			{/each}
+			{#if citations.length > 8}
+				<button
+					type="button"
+					class="flex min-w-[72px] shrink-0 items-center justify-center px-2 text-[11px] font-medium text-blue-600 transition hover:bg-black/[0.035] dark:text-blue-400 dark:hover:bg-white/[0.035]"
+					on:click={openAllCitations}
+				>
+					+{citations.length - 8}
+				</button>
+			{/if}
 		</div>
-
-		<!-- Expanded source list -->
-		{#if showCitations}
-			<div
-				class="flex flex-col gap-0.5
-					bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl
-					rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 p-1"
-				style="position: absolute; left: 0; z-index: 20; min-width: 200px; max-width: 320px; max-height: 240px; overflow-y: auto;
-					{openAbove ? 'bottom: 100%; margin-bottom: 6px;' : 'top: 100%; margin-top: 6px;'}"
-				transition:slide={{ duration: 200, easing: quintOut }}
-			>
-				{#each citations as citation, idx}
-					<button
-						id={`source-${id}-${idx + 1}`}
-						class="no-toggle outline-hidden flex items-center gap-2 px-2 py-1.5
-							rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition
-							w-full text-left group"
-						on:click={() => {
-							showCitationModal = true;
-							selectedCitation = citation;
-						}}
-					>
-						<span
-							class="flex-shrink-0 size-5 rounded-md bg-gray-100 dark:bg-gray-800
-								flex items-center justify-center text-gray-400 dark:text-gray-500"
-						>
-							{#if isWebCitation(citation)}
-								<GlobeAlt className="size-3" strokeWidth="2" />
-							{:else}
-								<Document className="size-3" strokeWidth="2" />
-							{/if}
-						</span>
-						<span
-							class="text-xs text-gray-600 dark:text-gray-300
-								group-hover:text-gray-900 dark:group-hover:text-white
-								transition truncate flex-1"
-						>
-							{getDisplayTitle(decodeString(citation.source?.name ?? ''), 60, 30, 20)}
-						</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
 	</div>
 {/if}

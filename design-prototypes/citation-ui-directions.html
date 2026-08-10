@@ -1,0 +1,1388 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>HaloWebUI 引用来源界面方向</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--page: #0d0f11;
+				--sidebar: #101214;
+				--surface: #15181b;
+				--surface-strong: #1a1e22;
+				--surface-hover: #20252a;
+				--line: #2a3036;
+				--line-soft: #20252a;
+				--text: #e8ecef;
+				--muted: #98a1aa;
+				--quiet: #737d86;
+				--accent: #43c8a6;
+				--accent-soft: rgba(67, 200, 166, 0.12);
+				--link: #9ab9ff;
+				--marker: #f2c66d;
+				--shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+			}
+
+			html[data-theme='light'] {
+				color-scheme: light;
+				--page: #f7f8f8;
+				--sidebar: #f0f2f3;
+				--surface: #ffffff;
+				--surface-strong: #f4f6f6;
+				--surface-hover: #eef1f2;
+				--line: #d9dfe2;
+				--line-soft: #e7ebed;
+				--text: #1d2328;
+				--muted: #606b74;
+				--quiet: #838c93;
+				--accent: #117e68;
+				--accent-soft: rgba(17, 126, 104, 0.1);
+				--link: #315fa8;
+				--marker: #9a6400;
+				--shadow: 0 18px 48px rgba(21, 32, 40, 0.16);
+			}
+
+			* {
+				box-sizing: border-box;
+				letter-spacing: 0;
+			}
+
+			html,
+			body {
+				min-height: 100%;
+				margin: 0;
+			}
+
+			body {
+				overflow-x: hidden;
+				background: var(--page);
+				color: var(--text);
+				font-family:
+					Inter,
+					ui-sans-serif,
+					system-ui,
+					-apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					sans-serif;
+				font-size: 14px;
+			}
+
+			button,
+			a {
+				font: inherit;
+			}
+
+			button {
+				color: inherit;
+			}
+
+			button:focus-visible,
+			a:focus-visible {
+				outline: 2px solid var(--accent);
+				outline-offset: 2px;
+			}
+
+			.app-shell {
+				min-height: 100vh;
+				display: grid;
+				grid-template-columns: 58px minmax(0, 1fr);
+			}
+
+			.rail-nav {
+				position: sticky;
+				top: 0;
+				height: 100vh;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 8px;
+				padding: 12px 8px;
+				border-right: 1px solid var(--line-soft);
+				background: var(--sidebar);
+			}
+
+			.brand-mark,
+			.icon-button,
+			.nav-button {
+				width: 36px;
+				height: 36px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border: 0;
+				border-radius: 7px;
+			}
+
+			.brand-mark {
+				margin-bottom: 8px;
+				background: var(--accent);
+				color: #07110e;
+				font-weight: 800;
+			}
+
+			.nav-button,
+			.icon-button {
+				cursor: pointer;
+				background: transparent;
+				color: var(--muted);
+			}
+
+			.nav-button:hover,
+			.icon-button:hover,
+			.nav-button.active {
+				color: var(--text);
+				background: var(--surface-hover);
+			}
+
+			.nav-spacer {
+				flex: 1;
+			}
+
+			.main-shell {
+				min-width: 0;
+			}
+
+			.topbar {
+				height: 56px;
+				position: sticky;
+				top: 0;
+				z-index: 10;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0 18px;
+				border-bottom: 1px solid var(--line-soft);
+				background: color-mix(in srgb, var(--page) 92%, transparent);
+				backdrop-filter: blur(12px);
+			}
+
+			.model-label {
+				min-width: 0;
+				display: flex;
+				align-items: center;
+				gap: 9px;
+				font-size: 13px;
+				font-weight: 650;
+			}
+
+			.model-dot {
+				width: 8px;
+				height: 8px;
+				flex: 0 0 auto;
+				border-radius: 50%;
+				background: var(--accent);
+				box-shadow: 0 0 0 4px var(--accent-soft);
+			}
+
+			.toolbar {
+				position: sticky;
+				top: 56px;
+				z-index: 9;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 10px;
+				padding: 10px 16px;
+				border-bottom: 1px solid var(--line-soft);
+				background: var(--page);
+			}
+
+			.toolbar-label {
+				color: var(--muted);
+				font-size: 12px;
+				font-weight: 650;
+				white-space: nowrap;
+			}
+
+			.segmented {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				width: min(640px, calc(100vw - 180px));
+				padding: 3px;
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				background: var(--surface);
+			}
+
+			.segment {
+				min-height: 34px;
+				border: 0;
+				border-radius: 6px;
+				background: transparent;
+				color: var(--muted);
+				cursor: pointer;
+				font-size: 12px;
+				font-weight: 600;
+				padding: 6px 10px;
+				white-space: nowrap;
+			}
+
+			.segment:hover {
+				color: var(--text);
+			}
+
+			.segment.active {
+				color: var(--text);
+				background: var(--surface-hover);
+				box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 75%, transparent);
+			}
+
+			.recommended {
+				margin-left: 4px;
+				color: var(--accent);
+				font-size: 10px;
+				font-weight: 700;
+			}
+
+			.chat-canvas {
+				width: min(900px, calc(100% - 40px));
+				margin: 0 auto;
+				padding: 38px 0 96px;
+			}
+
+			.user-row,
+			.assistant-row {
+				display: grid;
+				grid-template-columns: 32px minmax(0, 1fr);
+				gap: 12px;
+			}
+
+			.user-row {
+				margin-bottom: 32px;
+			}
+
+			.avatar {
+				width: 32px;
+				height: 32px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 50%;
+				background: var(--surface-strong);
+				color: var(--muted);
+				font-size: 12px;
+				font-weight: 750;
+			}
+
+			.avatar.halo {
+				background: var(--accent-soft);
+				color: var(--accent);
+			}
+
+			.message-label {
+				height: 32px;
+				display: flex;
+				align-items: center;
+				color: var(--quiet);
+				font-size: 12px;
+				font-weight: 650;
+			}
+
+			.user-copy {
+				margin-top: 4px;
+				color: var(--text);
+				font-size: 14px;
+				line-height: 1.7;
+			}
+
+			.answer {
+				min-width: 0;
+			}
+
+			.answer h2 {
+				margin: 3px 0 14px;
+				font-size: 18px;
+				line-height: 1.35;
+				font-weight: 720;
+			}
+
+			.answer p {
+				margin: 0 0 13px;
+				color: color-mix(in srgb, var(--text) 92%, var(--muted));
+				font-size: 14px;
+				line-height: 1.78;
+			}
+
+			.answer ul {
+				margin: 4px 0 16px;
+				padding-left: 20px;
+			}
+
+			.answer li {
+				margin: 6px 0;
+				line-height: 1.65;
+			}
+
+			.citation-mark {
+				min-width: 18px;
+				height: 18px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				margin: 0 1px;
+				padding: 0 5px;
+				border: 0;
+				border-radius: 5px;
+				background: color-mix(in srgb, var(--marker) 13%, transparent);
+				color: var(--marker);
+				cursor: pointer;
+				font-size: 10px;
+				font-weight: 750;
+				line-height: 1;
+				vertical-align: 0.2em;
+			}
+
+			.citation-mark:hover {
+				background: color-mix(in srgb, var(--marker) 21%, transparent);
+			}
+
+			.message-actions {
+				height: 38px;
+				display: flex;
+				align-items: center;
+				gap: 3px;
+				margin-top: 2px;
+				color: var(--quiet);
+			}
+
+			.action-button {
+				height: 30px;
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				padding: 0 8px;
+				border: 0;
+				border-radius: 6px;
+				background: transparent;
+				color: var(--quiet);
+				cursor: pointer;
+				font-size: 11px;
+			}
+
+			.action-button:hover {
+				color: var(--text);
+				background: var(--surface-hover);
+			}
+
+			.action-button.sources-only {
+				display: none;
+				color: var(--link);
+			}
+
+			.sources-region {
+				margin-top: 8px;
+			}
+
+			.sources-title-row {
+				min-height: 30px;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				color: var(--muted);
+				font-size: 12px;
+				font-weight: 650;
+			}
+
+			.sources-title {
+				display: flex;
+				align-items: center;
+				gap: 7px;
+			}
+
+			.count {
+				color: var(--quiet);
+				font-weight: 600;
+			}
+
+			.text-button {
+				height: 28px;
+				border: 0;
+				border-radius: 6px;
+				background: transparent;
+				color: var(--link);
+				cursor: pointer;
+				padding: 0 6px;
+				font-size: 11px;
+				font-weight: 600;
+			}
+
+			.text-button:hover {
+				background: var(--surface-hover);
+			}
+
+			.source-strip {
+				display: flex;
+				min-width: 0;
+				overflow-x: auto;
+				border-top: 1px solid var(--line-soft);
+				border-bottom: 1px solid var(--line-soft);
+				scrollbar-width: none;
+			}
+
+			.source-strip::-webkit-scrollbar {
+				display: none;
+			}
+
+			.strip-item {
+				min-width: 176px;
+				max-width: 220px;
+				height: 58px;
+				flex: 1 0 176px;
+				display: grid;
+				grid-template-columns: 22px minmax(0, 1fr);
+				grid-template-rows: 19px 17px;
+				column-gap: 8px;
+				align-content: center;
+				padding: 7px 14px;
+				border: 0;
+				border-right: 1px solid var(--line-soft);
+				background: transparent;
+				text-align: left;
+				cursor: pointer;
+			}
+
+			.strip-item:first-child {
+				padding-left: 4px;
+			}
+
+			.strip-item:hover {
+				background: var(--surface-hover);
+			}
+
+			.source-favicon {
+				width: 20px;
+				height: 20px;
+				grid-row: 1 / span 2;
+				align-self: center;
+				border-radius: 4px;
+				background: var(--surface-strong);
+				object-fit: cover;
+			}
+
+			.source-name,
+			.source-domain {
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.source-name {
+				color: var(--text);
+				font-size: 11px;
+				font-weight: 650;
+			}
+
+			.source-domain {
+				color: var(--quiet);
+				font-size: 10px;
+			}
+
+			.reference-list {
+				border-top: 1px solid var(--line-soft);
+			}
+
+			.reference-row {
+				width: 100%;
+				min-height: 48px;
+				display: grid;
+				grid-template-columns: 24px minmax(0, 1fr) auto;
+				align-items: center;
+				gap: 9px;
+				padding: 7px 4px;
+				border: 0;
+				border-bottom: 1px solid var(--line-soft);
+				background: transparent;
+				text-align: left;
+				cursor: pointer;
+			}
+
+			.reference-row:hover {
+				background: var(--surface-hover);
+			}
+
+			.reference-number {
+				color: var(--marker);
+				font-size: 11px;
+				font-weight: 750;
+			}
+
+			.reference-copy {
+				min-width: 0;
+			}
+
+			.reference-title,
+			.reference-meta {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.reference-title {
+				color: var(--text);
+				font-size: 12px;
+				font-weight: 620;
+			}
+
+			.reference-meta {
+				margin-top: 2px;
+				color: var(--quiet);
+				font-size: 10px;
+			}
+
+			.domain-badge {
+				max-width: 140px;
+				overflow: hidden;
+				color: var(--muted);
+				font-size: 10px;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.mode-panel {
+				display: none;
+			}
+
+			body[data-mode='strip'] .mode-strip,
+			body[data-mode='list'] .mode-list {
+				display: block;
+			}
+
+			body[data-mode='drawer'] .action-button.sources-only {
+				display: inline-flex;
+			}
+
+			body[data-mode='drawer'] .sources-region {
+				display: none;
+			}
+
+			.drawer-backdrop {
+				position: fixed;
+				inset: 0;
+				z-index: 30;
+				visibility: hidden;
+				opacity: 0;
+				background: rgba(0, 0, 0, 0.36);
+				transition:
+					opacity 160ms ease,
+					visibility 160ms ease;
+			}
+
+			.drawer-backdrop.open {
+				visibility: visible;
+				opacity: 1;
+			}
+
+			.source-drawer {
+				position: fixed;
+				top: 0;
+				right: 0;
+				z-index: 31;
+				width: min(540px, 94vw);
+				height: 100vh;
+				display: grid;
+				grid-template-rows: 58px 1fr;
+				border-left: 1px solid var(--line);
+				background: var(--surface);
+				box-shadow: var(--shadow);
+				transform: translateX(102%);
+				transition: transform 190ms ease;
+			}
+
+			.source-drawer.open {
+				transform: translateX(0);
+			}
+
+			.drawer-header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0 14px 0 18px;
+				border-bottom: 1px solid var(--line-soft);
+			}
+
+			.drawer-heading {
+				display: flex;
+				align-items: baseline;
+				gap: 8px;
+			}
+
+			.drawer-heading strong {
+				font-size: 14px;
+			}
+
+			.drawer-heading span {
+				color: var(--quiet);
+				font-size: 11px;
+			}
+
+			.drawer-content {
+				min-height: 0;
+				display: grid;
+				grid-template-columns: 190px minmax(0, 1fr);
+			}
+
+			.drawer-list {
+				min-height: 0;
+				overflow-y: auto;
+				border-right: 1px solid var(--line-soft);
+				padding: 8px;
+			}
+
+			.drawer-source {
+				width: 100%;
+				min-height: 50px;
+				display: grid;
+				grid-template-columns: 20px minmax(0, 1fr);
+				gap: 8px;
+				align-items: center;
+				padding: 7px;
+				border: 0;
+				border-radius: 6px;
+				background: transparent;
+				text-align: left;
+				cursor: pointer;
+			}
+
+			.drawer-source:hover,
+			.drawer-source.active {
+				background: var(--surface-hover);
+			}
+
+			.drawer-source.active {
+				box-shadow: inset 2px 0 var(--accent);
+			}
+
+			.drawer-source-copy {
+				min-width: 0;
+			}
+
+			.drawer-source-title,
+			.drawer-source-domain {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.drawer-source-title {
+				color: var(--text);
+				font-size: 11px;
+				font-weight: 650;
+			}
+
+			.drawer-source-domain {
+				margin-top: 2px;
+				color: var(--quiet);
+				font-size: 10px;
+			}
+
+			.source-detail {
+				min-width: 0;
+				overflow-y: auto;
+				padding: 22px;
+			}
+
+			.detail-origin {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				color: var(--muted);
+				font-size: 11px;
+			}
+
+			.detail-title {
+				margin: 14px 0 7px;
+				font-size: 17px;
+				line-height: 1.42;
+				font-weight: 720;
+			}
+
+			.detail-meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px 10px;
+				color: var(--quiet);
+				font-size: 10px;
+			}
+
+			.detail-actions {
+				display: flex;
+				gap: 6px;
+				margin: 18px 0 22px;
+			}
+
+			.command-button {
+				height: 32px;
+				display: inline-flex;
+				align-items: center;
+				gap: 7px;
+				padding: 0 10px;
+				border: 1px solid var(--line);
+				border-radius: 7px;
+				background: var(--surface-strong);
+				color: var(--text);
+				cursor: pointer;
+				font-size: 11px;
+				font-weight: 650;
+				text-decoration: none;
+			}
+
+			.command-button:hover {
+				background: var(--surface-hover);
+			}
+
+			.command-button.primary {
+				border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+				background: var(--accent-soft);
+				color: var(--accent);
+			}
+
+			.quote-label {
+				color: var(--quiet);
+				font-size: 10px;
+				font-weight: 700;
+				text-transform: uppercase;
+			}
+
+			.source-quote {
+				margin: 8px 0 0;
+				padding: 0 0 0 13px;
+				border-left: 2px solid var(--accent);
+				color: color-mix(in srgb, var(--text) 84%, var(--muted));
+				font-size: 12px;
+				line-height: 1.72;
+			}
+
+			.full-url {
+				margin-top: 20px;
+				color: var(--quiet);
+				font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+				font-size: 10px;
+				line-height: 1.5;
+				overflow-wrap: anywhere;
+			}
+
+			.toast {
+				position: fixed;
+				left: 50%;
+				bottom: 26px;
+				z-index: 50;
+				min-height: 34px;
+				display: flex;
+				align-items: center;
+				padding: 0 12px;
+				border: 1px solid var(--line);
+				border-radius: 7px;
+				background: var(--surface-strong);
+				color: var(--text);
+				box-shadow: var(--shadow);
+				font-size: 11px;
+				opacity: 0;
+				pointer-events: none;
+				transform: translate(-50%, 8px);
+				transition:
+					opacity 150ms ease,
+					transform 150ms ease;
+			}
+
+			.toast.show {
+				opacity: 1;
+				transform: translate(-50%, 0);
+			}
+
+			.composer {
+				position: fixed;
+				left: calc(58px + (100vw - 58px) / 2);
+				bottom: 18px;
+				z-index: 12;
+				width: min(760px, calc(100vw - 118px));
+				height: 52px;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				padding: 7px 8px 7px 14px;
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				background: var(--surface);
+				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+				transform: translateX(-50%);
+			}
+
+			.composer-placeholder {
+				flex: 1;
+				color: var(--quiet);
+				font-size: 12px;
+			}
+
+			.send-button {
+				width: 36px;
+				height: 36px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border: 0;
+				border-radius: 7px;
+				background: var(--accent);
+				color: #07110e;
+				cursor: pointer;
+			}
+
+			[data-lucide] {
+				width: 16px;
+				height: 16px;
+				stroke-width: 1.8;
+			}
+
+			@media (max-width: 720px) {
+				.app-shell {
+					grid-template-columns: minmax(0, 1fr);
+				}
+
+				.rail-nav {
+					display: none;
+				}
+
+				.toolbar {
+					align-items: stretch;
+					flex-direction: column;
+					gap: 6px;
+				}
+
+				.segmented {
+					width: 100%;
+				}
+
+				.segment {
+					white-space: normal;
+				}
+
+				.recommended {
+					display: none;
+				}
+
+				.chat-canvas {
+					width: calc(100% - 24px);
+					padding-top: 26px;
+				}
+
+				.user-row,
+				.assistant-row {
+					grid-template-columns: 28px minmax(0, 1fr);
+					gap: 9px;
+				}
+
+				.avatar {
+					width: 28px;
+					height: 28px;
+				}
+
+				.domain-badge {
+					display: none;
+				}
+
+				.reference-row {
+					grid-template-columns: 24px minmax(0, 1fr);
+				}
+
+				.source-drawer {
+					top: auto;
+					bottom: 0;
+					width: 100%;
+					height: min(78vh, 680px);
+					grid-template-rows: 52px 1fr;
+					border-top: 1px solid var(--line);
+					border-left: 0;
+					transform: translateY(102%);
+				}
+
+				.source-drawer.open {
+					transform: translateY(0);
+				}
+
+				.drawer-content {
+					grid-template-columns: 1fr;
+					grid-template-rows: 128px minmax(0, 1fr);
+				}
+
+				.drawer-list {
+					display: flex;
+					overflow-x: auto;
+					overflow-y: hidden;
+					border-right: 0;
+					border-bottom: 1px solid var(--line-soft);
+				}
+
+				.drawer-source {
+					min-width: 164px;
+				}
+
+				.source-detail {
+					padding: 18px;
+				}
+
+				.composer {
+					left: 50%;
+					width: calc(100vw - 24px);
+					bottom: 10px;
+				}
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				*,
+				*::before,
+				*::after {
+					scroll-behavior: auto !important;
+					transition-duration: 0.01ms !important;
+				}
+			}
+		</style>
+	</head>
+	<body data-mode="strip">
+		<div class="app-shell">
+			<nav class="rail-nav" aria-label="主导航">
+				<div class="brand-mark" title="HaloWebUI">H</div>
+				<button class="nav-button active" type="button" title="新对话" aria-label="新对话">
+					<i data-lucide="message-square-plus"></i>
+				</button>
+				<button class="nav-button" type="button" title="搜索" aria-label="搜索">
+					<i data-lucide="search"></i>
+				</button>
+				<button class="nav-button" type="button" title="知识库" aria-label="知识库">
+					<i data-lucide="library"></i>
+				</button>
+				<div class="nav-spacer"></div>
+				<button class="nav-button" type="button" title="设置" aria-label="设置">
+					<i data-lucide="settings"></i>
+				</button>
+			</nav>
+
+			<main class="main-shell">
+				<header class="topbar">
+					<div class="model-label"><span class="model-dot"></span><span>Halo Assistant</span></div>
+					<button
+						id="themeToggle"
+						class="icon-button"
+						type="button"
+						title="切换明暗主题"
+						aria-label="切换明暗主题"
+					>
+						<i data-lucide="sun-moon"></i>
+					</button>
+				</header>
+
+				<section class="toolbar" aria-label="引用呈现方式">
+					<span class="toolbar-label">引用呈现</span>
+					<div class="segmented" role="tablist" aria-label="引用呈现方向">
+						<button
+							class="segment active"
+							type="button"
+							role="tab"
+							aria-selected="true"
+							data-mode="strip"
+						>
+							文末来源栏 <span class="recommended">推荐</span>
+						</button>
+						<button class="segment" type="button" role="tab" aria-selected="false" data-mode="list">
+							紧凑引用列表
+						</button>
+						<button
+							class="segment"
+							type="button"
+							role="tab"
+							aria-selected="false"
+							data-mode="drawer"
+						>
+							仅按需查看
+						</button>
+					</div>
+				</section>
+
+				<section class="chat-canvas" aria-label="对话内容">
+					<div class="user-row">
+						<div class="avatar">你</div>
+						<div>
+							<div class="message-label">你</div>
+							<div class="user-copy">
+								Responses API 的兼容模式为什么需要显式选择？引用资料时请保留来源。
+							</div>
+						</div>
+					</div>
+
+					<div class="assistant-row">
+						<div class="avatar halo">H</div>
+						<article class="answer">
+							<div class="message-label">Halo Assistant</div>
+							<h2>协议兼容不能只看接口是否返回成功</h2>
+							<p>
+								不同网关可能暴露相同的模型名称和接口路径，但对请求字段、工具调用和流式终止事件的解释并不相同。OpenAI
+								的 Responses API 要求以明确的终止事件判断成功，而不能把自然断流当作完成。<button
+									class="citation-mark"
+									type="button"
+									data-source="1"
+									aria-label="查看来源 1"
+								>
+									1
+								</button>
+							</p>
+							<p>
+								图片编辑也存在类似差异：标准 OpenAI-compatible 服务通常接收 multipart 文件，grok2api
+								则使用 JSON data URL。仅凭 <code>grok-imagine-image</code> 模型名无法区分官方 xAI
+								与私有兼容网关。<button
+									class="citation-mark"
+									type="button"
+									data-source="2"
+									aria-label="查看来源 2"
+								>
+									2</button
+								><button
+									class="citation-mark"
+									type="button"
+									data-source="3"
+									aria-label="查看来源 3"
+								>
+									3
+								</button>
+							</p>
+							<ul>
+								<li>模型名用于判断能力候选，例如是否可能支持图片编辑。</li>
+								<li>连接类型用于确定实际协议，避免错误请求或重复计费。</li>
+								<li>
+									正文引用只显示稳定编号，标题、域名、原文摘录和完整链接统一放在来源详情中。<button
+										class="citation-mark"
+										type="button"
+										data-source="4"
+										aria-label="查看来源 4"
+									>
+										4
+									</button>
+								</li>
+							</ul>
+							<p>
+								对普通用户，连接配置可以默认自动推荐；对无法可靠识别的反向代理，则保留显式覆盖。这样既减少设置负担，也不会在真实生成请求中进行有副作用的盲目重试。<button
+									class="citation-mark"
+									type="button"
+									data-source="5"
+									aria-label="查看来源 5"
+								>
+									5
+								</button>
+							</p>
+
+							<div class="message-actions" aria-label="消息操作">
+								<button class="action-button" type="button" title="复制回答">
+									<i data-lucide="copy"></i>
+								</button>
+								<button class="action-button" type="button" title="赞同">
+									<i data-lucide="thumbs-up"></i>
+								</button>
+								<button class="action-button" type="button" title="不赞同">
+									<i data-lucide="thumbs-down"></i>
+								</button>
+								<button class="action-button sources-only" type="button" data-open-all>
+									<i data-lucide="book-open"></i><span>5 个来源</span>
+								</button>
+							</div>
+
+							<div class="sources-region">
+								<section class="mode-panel mode-strip" aria-label="文末来源栏">
+									<div class="sources-title-row">
+										<div class="sources-title">
+											<i data-lucide="book-open"></i><span>来源</span><span class="count">5</span>
+										</div>
+										<button class="text-button" type="button" data-open-all>查看全部</button>
+									</div>
+									<div id="sourceStrip" class="source-strip"></div>
+								</section>
+
+								<section class="mode-panel mode-list" aria-label="紧凑引用列表">
+									<div class="sources-title-row">
+										<div class="sources-title">
+											<i data-lucide="list"></i><span>参考资料</span><span class="count">5</span>
+										</div>
+										<button class="text-button" type="button" data-open-all>在侧栏中查看</button>
+									</div>
+									<div id="referenceList" class="reference-list"></div>
+								</section>
+							</div>
+						</article>
+					</div>
+				</section>
+			</main>
+		</div>
+
+		<div class="composer" aria-label="消息输入区域">
+			<button class="icon-button" type="button" title="添加附件" aria-label="添加附件">
+				<i data-lucide="paperclip"></i>
+			</button>
+			<span class="composer-placeholder">发送消息…</span>
+			<button class="send-button" type="button" title="发送" aria-label="发送">
+				<i data-lucide="arrow-up"></i>
+			</button>
+		</div>
+
+		<div id="drawerBackdrop" class="drawer-backdrop"></div>
+		<aside id="sourceDrawer" class="source-drawer" aria-hidden="true" aria-label="来源详情">
+			<header class="drawer-header">
+				<div class="drawer-heading"><strong>引用来源</strong><span>5 项</span></div>
+				<button
+					id="closeDrawer"
+					class="icon-button"
+					type="button"
+					title="关闭"
+					aria-label="关闭来源详情"
+				>
+					<i data-lucide="x"></i>
+				</button>
+			</header>
+			<div class="drawer-content">
+				<div id="drawerList" class="drawer-list" aria-label="来源列表"></div>
+				<div id="sourceDetail" class="source-detail"></div>
+			</div>
+		</aside>
+
+		<div id="toast" class="toast" role="status" aria-live="polite">链接已复制</div>
+
+		<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+		<script>
+			const sources = [
+				{
+					id: 1,
+					title: 'Responses API reference',
+					domain: 'platform.openai.com',
+					url: 'https://platform.openai.com/docs/api-reference/responses',
+					date: 'OpenAI API 文档',
+					favicon: 'https://www.google.com/s2/favicons?domain=platform.openai.com&sz=64',
+					quote:
+						'Responses 对象通过明确的完成或失败状态表达请求结果；流式客户端需要解析对应的事件类型，而不是仅依赖连接关闭。'
+				},
+				{
+					id: 2,
+					title: 'xAI API documentation',
+					domain: 'docs.x.ai',
+					url: 'https://docs.x.ai/docs/overview',
+					date: 'xAI 开发者文档',
+					favicon: 'https://www.google.com/s2/favicons?domain=docs.x.ai&sz=64',
+					quote:
+						'官方端点与第三方 OpenAI-compatible 网关可能使用相同模型标识，但并不因此共享所有私有扩展协议。'
+				},
+				{
+					id: 3,
+					title: 'HaloWebUI v0.2.4 release',
+					domain: 'github.com',
+					url: 'https://github.com/sanjinze47/HaloWebUI/releases/tag/v0.2.4',
+					date: '2026-08-10 · GitHub Release',
+					favicon: 'https://www.google.com/s2/favicons?domain=github.com&sz=64',
+					quote:
+						'该版本为 grok2api 图片编辑增加独立兼容配置，同时保留标准 OpenAI-compatible multipart 行为。'
+				},
+				{
+					id: 4,
+					title: 'Server-sent events: using server-sent events',
+					domain: 'developer.mozilla.org',
+					url: 'https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events',
+					date: 'MDN Web Docs',
+					favicon: 'https://www.google.com/s2/favicons?domain=developer.mozilla.org&sz=64',
+					quote:
+						'SSE 消息由命名事件和数据字段组成。业务层的完成语义需要由协议事件定义，而不是由传输层 EOF 推断。'
+				},
+				{
+					id: 5,
+					title: 'Provider compatibility contract',
+					domain: 'github.com',
+					url: 'https://github.com/sanjinze47/HaloWebUI/blob/main/docs/PROVIDER_COMPATIBILITY.md',
+					date: 'HaloWebUI 项目文档',
+					favicon: 'https://www.google.com/s2/favicons?domain=github.com&sz=64',
+					quote:
+						'显式模式应保持语义并清晰失败；自动模式只允许执行经过约束、不会静默改变用户请求含义的兼容行为。'
+				}
+			];
+
+			const sourceStrip = document.getElementById('sourceStrip');
+			const referenceList = document.getElementById('referenceList');
+			const drawerList = document.getElementById('drawerList');
+			const sourceDetail = document.getElementById('sourceDetail');
+			const sourceDrawer = document.getElementById('sourceDrawer');
+			const drawerBackdrop = document.getElementById('drawerBackdrop');
+			const closeDrawerButton = document.getElementById('closeDrawer');
+			const toast = document.getElementById('toast');
+			let selectedSourceId = 1;
+			let toastTimer;
+
+			function safeText(value) {
+				return String(value)
+					.replaceAll('&', '&amp;')
+					.replaceAll('<', '&lt;')
+					.replaceAll('>', '&gt;')
+					.replaceAll('"', '&quot;')
+					.replaceAll("'", '&#039;');
+			}
+
+			function sourceImage(source) {
+				return `<img class="source-favicon" src="${safeText(source.favicon)}" alt="" onerror="this.style.visibility='hidden'" />`;
+			}
+
+			function renderStrip() {
+				sourceStrip.innerHTML = sources
+					.map(
+						(source) => `
+        <button class="strip-item" type="button" data-source="${source.id}" title="${safeText(source.title)}">
+          ${sourceImage(source)}
+          <span class="source-name">${source.id}. ${safeText(source.title)}</span>
+          <span class="source-domain">${safeText(source.domain)}</span>
+        </button>
+      `
+					)
+					.join('');
+			}
+
+			function renderReferenceList() {
+				referenceList.innerHTML = sources
+					.map(
+						(source) => `
+        <button class="reference-row" type="button" data-source="${source.id}">
+          <span class="reference-number">[${source.id}]</span>
+          <span class="reference-copy">
+            <span class="reference-title">${safeText(source.title)}</span>
+            <span class="reference-meta">${safeText(source.date)}</span>
+          </span>
+          <span class="domain-badge">${safeText(source.domain)}</span>
+        </button>
+      `
+					)
+					.join('');
+			}
+
+			function renderDrawerList() {
+				drawerList.innerHTML = sources
+					.map(
+						(source) => `
+        <button class="drawer-source ${source.id === selectedSourceId ? 'active' : ''}" type="button" data-source="${source.id}">
+          <img class="source-favicon" src="${safeText(source.favicon)}" alt="" onerror="this.style.visibility='hidden'" />
+          <span class="drawer-source-copy">
+            <span class="drawer-source-title">${source.id}. ${safeText(source.title)}</span>
+            <span class="drawer-source-domain">${safeText(source.domain)}</span>
+          </span>
+        </button>
+      `
+					)
+					.join('');
+			}
+
+			function renderDetail() {
+				const source = sources.find((item) => item.id === selectedSourceId) || sources[0];
+				sourceDetail.innerHTML = `
+        <div class="detail-origin">
+          <img class="source-favicon" src="${safeText(source.favicon)}" alt="" onerror="this.style.visibility='hidden'" />
+          <span>${safeText(source.domain)}</span>
+          <span>·</span>
+          <span>来源 ${source.id}</span>
+        </div>
+        <h3 class="detail-title">${safeText(source.title)}</h3>
+        <div class="detail-meta"><span>${safeText(source.date)}</span><span>外部链接</span></div>
+        <div class="detail-actions">
+          <a class="command-button primary" href="${safeText(source.url)}" target="_blank" rel="noopener noreferrer nofollow">
+            <i data-lucide="external-link"></i><span>打开原文</span>
+          </a>
+          <button class="command-button" type="button" id="copySourceLink">
+            <i data-lucide="copy"></i><span>复制链接</span>
+          </button>
+        </div>
+        <div class="quote-label">引用片段</div>
+        <blockquote class="source-quote">${safeText(source.quote)}</blockquote>
+        <div class="full-url">${safeText(source.url)}</div>
+      `;
+				document
+					.getElementById('copySourceLink')
+					.addEventListener('click', () => copyLink(source.url));
+				if (window.lucide) window.lucide.createIcons();
+			}
+
+			function openDrawer(sourceId = 1) {
+				selectedSourceId = Number(sourceId) || 1;
+				renderDrawerList();
+				renderDetail();
+				sourceDrawer.classList.add('open');
+				drawerBackdrop.classList.add('open');
+				sourceDrawer.setAttribute('aria-hidden', 'false');
+				document.body.style.overflow = 'hidden';
+			}
+
+			function closeDrawer() {
+				sourceDrawer.classList.remove('open');
+				drawerBackdrop.classList.remove('open');
+				sourceDrawer.setAttribute('aria-hidden', 'true');
+				document.body.style.overflow = '';
+			}
+
+			async function copyLink(url) {
+				try {
+					await navigator.clipboard.writeText(url);
+				} catch {
+					const input = document.createElement('textarea');
+					input.value = url;
+					input.style.position = 'fixed';
+					input.style.opacity = '0';
+					document.body.appendChild(input);
+					input.select();
+					document.execCommand('copy');
+					input.remove();
+				}
+				clearTimeout(toastTimer);
+				toast.classList.add('show');
+				toastTimer = setTimeout(() => toast.classList.remove('show'), 1400);
+			}
+
+			function bindSourceButtons(root = document) {
+				root.querySelectorAll('[data-source]').forEach((button) => {
+					button.addEventListener('click', () => openDrawer(button.dataset.source));
+				});
+			}
+
+			renderStrip();
+			renderReferenceList();
+			renderDrawerList();
+			renderDetail();
+			bindSourceButtons();
+
+			drawerList.addEventListener('click', (event) => {
+				const button = event.target.closest('[data-source]');
+				if (!button) return;
+				selectedSourceId = Number(button.dataset.source) || 1;
+				renderDrawerList();
+				renderDetail();
+			});
+
+			document.querySelectorAll('[data-open-all]').forEach((button) => {
+				button.addEventListener('click', () => openDrawer(1));
+			});
+
+			document.querySelectorAll('.segment').forEach((segment) => {
+				segment.addEventListener('click', () => {
+					const mode = segment.dataset.mode;
+					document.body.dataset.mode = mode;
+					document.querySelectorAll('.segment').forEach((item) => {
+						const active = item === segment;
+						item.classList.toggle('active', active);
+						item.setAttribute('aria-selected', active ? 'true' : 'false');
+					});
+				});
+			});
+
+			document.getElementById('themeToggle').addEventListener('click', () => {
+				document.documentElement.dataset.theme =
+					document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+			});
+
+			closeDrawerButton.addEventListener('click', closeDrawer);
+			drawerBackdrop.addEventListener('click', closeDrawer);
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape') closeDrawer();
+			});
+
+			if (window.lucide) window.lucide.createIcons();
+		</script>
+	</body>
+</html>
