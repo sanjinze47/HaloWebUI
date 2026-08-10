@@ -29,7 +29,7 @@
 
 	export let id = '';
 	export let sources: Record<string, any>[] = [];
-	export let inlineCitationsVisible = true;
+	export let inlineCitationsVisible = false;
 	export let onToggleInlineCitations: (() => void) | null = null;
 
 	let citations: Citation[] = [];
@@ -78,8 +78,15 @@
 	}
 
 	function openCitation(citation: Citation) {
+		if (!inlineCitationsVisible) return;
+
 		selectedCitation = citation;
 		showCitationDrawer = true;
+	}
+
+	function closeCitationDrawer() {
+		showCitationDrawer = false;
+		selectedCitation = null;
 	}
 
 	function openAllCitations() {
@@ -166,7 +173,7 @@
 	}
 
 	$: if (!inlineCitationsVisible) {
-		showCitationDrawer = false;
+		closeCitationDrawer();
 	}
 </script>
 
@@ -176,9 +183,10 @@
 	{citations}
 	{showPercentage}
 	{showRelevance}
+	on:close={closeCitationDrawer}
 />
 
-{#if citations.length > 0}
+{#if citations.length > 0 && inlineCitationsVisible}
 	{@const hasWebCitations = citations.some(isWebCitation)}
 	<div class="-mx-0.5 mt-2 w-full">
 		{#if inlineCitationsVisible}

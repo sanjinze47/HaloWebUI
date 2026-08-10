@@ -707,7 +707,7 @@
 	};
 
 	const toggleInlineCitations = async () => {
-		const previousValue = $settings?.showInlineCitations ?? true;
+		const previousValue = $settings?.showInlineCitations ?? false;
 		const nextValue = !previousValue;
 		const optimisticSettings = {
 			...($settings ?? {}),
@@ -723,7 +723,7 @@
 		try {
 			await saveUserSettingsPatch(localStorage.token, { showInlineCitations: nextValue });
 		} catch (error) {
-			if (($settings?.showInlineCitations ?? true) === nextValue) {
+			if (($settings?.showInlineCitations ?? false) === nextValue) {
 				settings.update((current) => ({
 					...(current ?? {}),
 					showInlineCitations: previousValue
@@ -1716,7 +1716,7 @@
 													bind:this={citationsRef}
 													id={message?.id}
 													sources={message?.sources ?? message?.citations}
-													inlineCitationsVisible={$settings?.showInlineCitations ?? true}
+													inlineCitationsVisible={$settings?.showInlineCitations ?? false}
 													onToggleInlineCitations={toggleInlineCitations}
 												/>
 											</div>

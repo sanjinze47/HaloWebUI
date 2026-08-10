@@ -78,7 +78,7 @@ export const DEFAULT_USER_DEFAULT_UI_TEMPLATE: UserDefaultUiTemplate = {
 	newChatInheritsPreviousState: false,
 	collapseCodeBlocks: false,
 	collapseHistoricalLongResponses: true,
-	showInlineCitations: true,
+	showInlineCitations: false,
 	showMessageOutline: true,
 	expandDetails: false,
 	insertSuggestionPrompt: false,

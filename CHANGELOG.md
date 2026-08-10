@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hid citation source cards and inline citation markers by default, and synchronized citation drawer close state so citations can be dismissed cleanly.
 - Allowed normal Responses `response.created` and `response.in_progress` events to pass through instead of treating their expected `in_progress` status as a failed conversation.
 - Accepted terminal Responses events with a stale `in_progress` status from compatibility gateways while retaining direct-response and explicit failure validation.
 

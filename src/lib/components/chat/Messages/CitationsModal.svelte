@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { createEventDispatcher, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { BookOpen, Copy, ExternalLink, X } from 'lucide-svelte';
 	import Drawer from '$lib/components/common/Drawer.svelte';
@@ -26,6 +26,7 @@
 	import Markdown from './Markdown.svelte';
 
 	const i18n: any = getContext('i18n');
+	const dispatch = createEventDispatcher();
 	const tr = (key: string, defaultValue: string, options: Record<string, any> = {}) =>
 		translateWithDefault($i18n, key, defaultValue, options);
 
@@ -114,10 +115,6 @@
 		}
 	}
 
-	$: if (!citation && citations.length > 0) {
-		citation = citations[0];
-	}
-
 	$: if (citation) {
 		mergedDocuments = getCitationEntries(citation).map(({ document, metadata, distance }) => ({
 			source: citation?.source,
@@ -144,6 +141,7 @@
 		? 'h-[86dvh] max-h-[720px] w-full overflow-hidden rounded-t-xl bg-white dark:bg-gray-900'
 		: 'h-full w-full max-w-[680px] overflow-hidden bg-white dark:bg-gray-900'}
 	overlayClassName="bg-black/25 dark:bg-black/40"
+	on:close={() => dispatch('close')}
 >
 	<div
 		class="flex h-full min-h-0 flex-col"

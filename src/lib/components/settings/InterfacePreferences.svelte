@@ -133,7 +133,7 @@
 	let textScale: number | null = null;
 	let collapseCodeBlocks = false;
 	let collapseHistoricalLongResponses = true;
-	let showInlineCitations = true;
+	let showInlineCitations = false;
 	let showMessageOutline = true;
 	let showFormulaQuickCopyButton = true;
 	let expandDetails = false;
@@ -1272,7 +1272,7 @@
 		collapseCodeBlocks = $settings?.collapseCodeBlocks ?? false;
 		collapseHistoricalLongResponses = $settings?.collapseHistoricalLongResponses ?? true;
 		responseHtmlFormat = $settings?.responseHtmlFormat ?? false;
-		showInlineCitations = $settings?.showInlineCitations ?? true;
+		showInlineCitations = $settings?.showInlineCitations ?? false;
 		showMessageOutline = $settings?.showMessageOutline ?? true;
 		showFormulaQuickCopyButton = $settings?.showFormulaQuickCopyButton ?? true;
 		expandDetails = $settings?.expandDetails ?? false;

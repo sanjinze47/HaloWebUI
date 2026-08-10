@@ -844,7 +844,7 @@
 <div class="relative overflow-visible">
 	<div
 		bind:this={contentContainerElement}
-		data-inline-citations-hidden={($settings?.showInlineCitations ?? true) ? undefined : 'true'}
+		data-inline-citations-hidden={($settings?.showInlineCitations ?? false) ? undefined : 'true'}
 		class="relative message-selection-surface"
 		on:copy={handleContentCopy}
 		style={needsTruncation && !isExpanded

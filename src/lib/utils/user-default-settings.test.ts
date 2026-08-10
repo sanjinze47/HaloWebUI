@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	DEFAULT_USER_DEFAULT_UI_TEMPLATE,
 	buildNewUserDefaultSettingsPayload,
 	normalizeNewUserDefaultSettings,
 	pickUserDefaultUiFields
 } from './user-default-settings';
 
 describe('user default settings helpers', () => {
+	it('defaults citation sources to hidden', () => {
+		expect(DEFAULT_USER_DEFAULT_UI_TEMPLATE.showInlineCitations).toBe(false);
+	});
+
 	it('picks only template-safe user settings from current preferences', () => {
 		const picked = pickUserDefaultUiFields({
 			models: ['gpt-4o'],
