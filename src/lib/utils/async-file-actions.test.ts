@@ -43,7 +43,7 @@ describe('async file actions', () => {
 
 	it('retains an attachment on deletion failure and deduplicates concurrent deletion', async () => {
 		const items = [{ id: 'file-1', itemId: 'upload-1', preview_url: 'blob:test' }];
-		const pending = new Set<string | object>();
+		const pending = new Set<string | (typeof items)[number]>();
 		let rejectDelete: (error: Error) => void = () => {};
 		const deleteRemote = vi.fn(
 			() =>
@@ -74,7 +74,7 @@ describe('async file actions', () => {
 		const first: Attachment = { id: 'file-1' };
 		const second: Attachment = { id: 'file-2' };
 		let files = [first, second];
-		const pending = new Set<string | object>();
+		const pending = new Set<string | Attachment>();
 		const resolvers = new Map<string, () => void>();
 		const deleteRemote = (item: Attachment) =>
 			new Promise<void>((resolve) => {
