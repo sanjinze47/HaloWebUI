@@ -73,9 +73,7 @@ def test_failed_upload_record_delete_restores_pending_error(monkeypatch):
     file_router._cleanup_failed_uploaded_file(file.id, file.path)
 
     assert metadata_updates[-1]["deletion_pending"] is True
-    assert "Failed to delete file record" in metadata_updates[-1][
-        "deletion_last_error"
-    ]
+    assert "Failed to delete file record" in metadata_updates[-1]["deletion_last_error"]
 
 
 def test_failed_upload_does_not_clean_storage_before_tombstone(monkeypatch):

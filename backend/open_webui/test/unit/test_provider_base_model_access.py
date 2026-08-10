@@ -128,7 +128,9 @@ def test_router_still_rejects_unknown_base_model_for_user(
 
 
 @pytest.mark.parametrize(("router_module", "config_attr"), PROVIDER_CASES)
-def test_admin_keeps_missing_model_path_unblocked(monkeypatch, router_module, config_attr: str):
+def test_admin_keeps_missing_model_path_unblocked(
+    monkeypatch, router_module, config_attr: str
+):
     request = _make_request()
     admin = _make_user(role="admin")
     load_calls = {"count": 0}
@@ -148,7 +150,9 @@ def test_admin_keeps_missing_model_path_unblocked(monkeypatch, router_module, co
     assert load_calls["count"] == 0
 
 
-def test_anthropic_missing_db_record_base_model_is_not_preemptively_rejected(monkeypatch):
+def test_anthropic_missing_db_record_base_model_is_not_preemptively_rejected(
+    monkeypatch,
+):
     request = _make_request()
     user = _make_user()
 
@@ -156,7 +160,7 @@ def test_anthropic_missing_db_record_base_model_is_not_preemptively_rejected(mon
     monkeypatch.setattr(
         anthropic_router,
         "_resolve_connection_by_model_id",
-        lambda _connection_user, _model_id: (0, "", "", {}),
+        lambda _connection_user, _model_id, **_kwargs: (0, "", "", {}),
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -183,10 +187,16 @@ def test_ollama_missing_db_record_base_model_is_not_preemptively_rejected(monkey
     monkeypatch.setattr(
         ollama_router,
         "_resolve_ollama_connection_by_model_id",
-        lambda _connection_user, _model_id, url_idx=None: (0, "http://ollama.local", {}),
+        lambda _connection_user, _model_id, url_idx=None: (
+            0,
+            "http://ollama.local",
+            {},
+        ),
     )
     monkeypatch.setattr(
-        ollama_router, "_get_ollama_user_config", lambda _connection_user: (["http://ollama.local"], {})
+        ollama_router,
+        "_get_ollama_user_config",
+        lambda _connection_user: (["http://ollama.local"], {}),
     )
     monkeypatch.setattr(ollama_router, "get_api_key", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(ollama_router, "send_post_request", fake_send_post_request)

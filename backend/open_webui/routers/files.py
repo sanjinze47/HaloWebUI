@@ -84,9 +84,7 @@ def _coerce_size_limit_bytes(value, *, default_unit: str = "mb") -> Optional[int
         number = float(value)
         unit = default_unit
     else:
-        match = re.fullmatch(
-            r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I
-        )
+        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I)
         if not match:
             return None
         number = float(match.group(1))
@@ -137,7 +135,6 @@ def _get_allowed_mime_types(request: Request) -> list[str]:
     if configured is None:
         configured = RAG_ALLOWED_FILE_MIME_TYPES
     return _normalize_allowed_values(configured)
-
 
 
 def _mime_type_is_allowed(content_type: str, allowed_types: list[str]) -> bool:
@@ -203,13 +200,9 @@ def _validate_uploaded_file(
         )
 
     config = request.app.state.config
-    single_limit = _coerce_size_limit_bytes(
-        getattr(config, "FILE_MAX_SIZE", None)
-    )
+    single_limit = _coerce_size_limit_bytes(getattr(config, "FILE_MAX_SIZE", None))
     if single_limit is None:
-        single_limit = _coerce_size_limit_bytes(
-            os.environ.get("RAG_FILE_MAX_SIZE")
-        )
+        single_limit = _coerce_size_limit_bytes(os.environ.get("RAG_FILE_MAX_SIZE"))
     if single_limit is not None and size > single_limit:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -284,8 +277,16 @@ def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
             try:
                 if file:
                     cleanup_file_dependencies(file)
-                elif file_path:
-                    Storage.delete_file(file_path)
+                else:
+                    standalone_collection = f"file-{file_id}"
+                    if VECTOR_DB_CLIENT.has_collection(
+                        collection_name=standalone_collection
+                    ):
+                        VECTOR_DB_CLIENT.delete_collection(
+                            collection_name=standalone_collection
+                        )
+                    if file_path:
+                        Storage.delete_file(file_path)
             except Exception as exc:
                 log.debug("Failed to clean failed upload %s: %s", file_id, exc)
                 cleanup_error = exc
@@ -299,9 +300,7 @@ def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
     if file_id:
         if cleanup_error is None:
             if not Files.delete_file_by_id(file_id):
-                cleanup_error = RuntimeError(
-                    f"Failed to delete file record {file_id}."
-                )
+                cleanup_error = RuntimeError(f"Failed to delete file record {file_id}.")
         if cleanup_error is not None:
             Files.update_file_metadata_by_id(
                 file_id,
@@ -483,7 +482,9 @@ def upload_file(
                         ),
                         user=user,
                     )
-                    warning_message = process_result.get("notice") if process_result else None
+                    warning_message = (
+                        process_result.get("notice") if process_result else None
+                    )
 
                 file_item = Files.get_file_by_id(id=id)
                 if warning_message:

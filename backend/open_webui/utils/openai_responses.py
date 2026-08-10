@@ -46,11 +46,11 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
     if event_type == "response.failed" and not error:
         error = response_obj.get("error")
 
-    status = str(
-        response_obj.get("status")
-        if response_obj
-        else value.get("status") or ""
-    ).strip().lower()
+    status = (
+        str(response_obj.get("status") if response_obj else value.get("status") or "")
+        .strip()
+        .lower()
+    )
     if event_type in {"response.completed", "response.done"} and status in {
         "failed",
         "incomplete",
@@ -215,7 +215,9 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[str, Any]:
+def resolve_responses_compatibility(
+    api_config: Optional[dict] = None,
+) -> dict[str, Any]:
     """Resolve connection-level defaults for OpenAI-compatible Responses APIs."""
     config = api_config if isinstance(api_config, dict) else {}
     mode = str(config.get("responses_compatibility") or "standard").strip().lower()
@@ -364,10 +366,7 @@ def _stringify_message_content(content: Any) -> str:
         return "".join(parts)
     if isinstance(content, dict):
         return (
-            content.get("text")
-            or content.get("content")
-            or content.get("value")
-            or ""
+            content.get("text") or content.get("content") or content.get("value") or ""
         )
     return ""
 
@@ -390,11 +389,18 @@ def _stringify_reasoning_content(content: Any) -> str:
     if isinstance(content, dict):
         item_type = content.get("type", "")
         if item_type in ("summary_text", "reasoning_text", "output_text", "text"):
-            text = content.get("text") or content.get("content") or content.get("value") or ""
+            text = (
+                content.get("text")
+                or content.get("content")
+                or content.get("value")
+                or ""
+            )
             if text:
                 return str(text)
 
-        direct_text = content.get("text") or content.get("content") or content.get("value")
+        direct_text = (
+            content.get("text") or content.get("content") or content.get("value")
+        )
         if isinstance(direct_text, str) and direct_text:
             return direct_text
 
@@ -433,7 +439,11 @@ def convert_tools_chat_to_responses(tools: Any) -> Any:
                         {
                             "type": "function",
                             "name": name,
-                            **({"description": fn.get("description")} if fn.get("description") else {}),
+                            **(
+                                {"description": fn.get("description")}
+                                if fn.get("description")
+                                else {}
+                            ),
                             "parameters": params,
                             # Responses defaults strict=true; keep explicit if provided.
                             **({"strict": fn.get("strict")} if "strict" in fn else {}),
@@ -527,7 +537,12 @@ def _content_chat_to_responses(content: Any, *, role: str = "user") -> Any:
                         url = image_url
                     if url is None and t == "input_image":
                         url = item.get("image_url")
-                    parts.append({"type": text_part_type, "text": f"[image]{' ' + url if url else ''}"})
+                    parts.append(
+                        {
+                            "type": text_part_type,
+                            "text": f"[image]{' ' + url if url else ''}",
+                        }
+                    )
                     continue
                 image_url = item.get("image_url")
                 url = None
@@ -558,7 +573,9 @@ def _content_chat_to_responses(content: Any, *, role: str = "user") -> Any:
                 continue
         # If we couldn't map anything, fall back to a string.
         if not parts:
-            return [{"type": text_part_type, "text": _stringify_message_content(content)}]
+            return [
+                {"type": text_part_type, "text": _stringify_message_content(content)}
+            ]
         return parts
 
     return [{"type": text_part_type, "text": _stringify_message_content(content)}]
@@ -695,7 +712,9 @@ def convert_chat_completions_to_responses_payload(
     # Responses API has its own stream_options schema and does not accept
     # Chat Completions' `stream_options.include_usage`.
     # Keep only options that are valid for Responses streaming.
-    if responses_payload.get("stream") is True and isinstance(chat_payload.get("stream_options"), dict):
+    if responses_payload.get("stream") is True and isinstance(
+        chat_payload.get("stream_options"), dict
+    ):
         stream_options = sanitize_stream_options_for_responses(
             chat_payload.get("stream_options")
         )
@@ -716,8 +735,13 @@ def convert_chat_completions_to_responses_payload(
     # GPT-5 series: text parameter (verbosity control).
     if isinstance(chat_payload.get("text"), dict):
         responses_payload["text"] = chat_payload["text"]
-    elif isinstance(chat_payload.get("verbosity"), str) and chat_payload["verbosity"].strip():
-        responses_payload.setdefault("text", {})["verbosity"] = chat_payload["verbosity"].strip().lower()
+    elif (
+        isinstance(chat_payload.get("verbosity"), str)
+        and chat_payload["verbosity"].strip()
+    ):
+        responses_payload.setdefault("text", {})["verbosity"] = (
+            chat_payload["verbosity"].strip().lower()
+        )
 
     # Reasoning config.
     reasoning = (
@@ -733,7 +757,10 @@ def convert_chat_completions_to_responses_payload(
     reasoning_summary = chat_payload.get("reasoning_summary")
     if isinstance(reasoning_summary, str) and reasoning_summary.strip():
         reasoning["summary"] = reasoning_summary.strip().lower()
-    elif isinstance(reasoning.get("summary"), str) and reasoning.get("summary", "").strip():
+    elif (
+        isinstance(reasoning.get("summary"), str)
+        and reasoning.get("summary", "").strip()
+    ):
         reasoning["summary"] = reasoning["summary"].strip().lower()
 
     # Responses API does not emit reasoning summaries unless explicitly requested.
@@ -772,7 +799,9 @@ def convert_chat_completions_to_responses_payload(
 
     # Tools/tool_choice.
     if "tools" in chat_payload:
-        responses_payload["tools"] = convert_tools_chat_to_responses(chat_payload.get("tools"))
+        responses_payload["tools"] = convert_tools_chat_to_responses(
+            chat_payload.get("tools")
+        )
     if "tool_choice" in chat_payload:
         responses_payload["tool_choice"] = convert_tool_choice_chat_to_responses(
             chat_payload.get("tool_choice")
@@ -816,7 +845,9 @@ def convert_chat_completions_to_responses_payload(
     return responses_payload
 
 
-def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+def convert_responses_to_chat_completions(
+    responses_data: Dict[str, Any], model_id: str
+) -> Dict[str, Any]:
     _raise_for_responses_failure(responses_data)
     output = responses_data.get("output", []) or []
     content = ""
@@ -873,7 +904,12 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
                     "role": "assistant",
                     "content": content,
                     **(
-                        {"annotations": [url_citation_to_chat_annotation(citation) for citation in citations]}
+                        {
+                            "annotations": [
+                                url_citation_to_chat_annotation(citation)
+                                for citation in citations
+                            ]
+                        }
                         if citations
                         else {}
                     ),
@@ -888,7 +924,11 @@ def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_
             }
         ],
         "usage": responses_data.get("usage", {}) or {},
-        **({"sources": [url_citation_to_source(citation) for citation in citations]} if citations else {}),
+        **(
+            {"sources": [url_citation_to_source(citation) for citation in citations]}
+            if citations
+            else {}
+        ),
     }
 
 
@@ -1021,7 +1061,9 @@ class _ResponsesEventAccumulator:
             if isinstance(response.get("usage"), dict):
                 self.usage = response["usage"]
 
-        self.response_id = event.get("response_id") or event.get("id") or self.response_id
+        self.response_id = (
+            event.get("response_id") or event.get("id") or self.response_id
+        )
         self.model = event.get("model") or self.model
         if isinstance(event.get("usage"), dict):
             self.usage = event["usage"]
@@ -1074,9 +1116,11 @@ class _ResponsesEventAccumulator:
             family = (
                 "reasoning_summary"
                 if event_type.startswith("response.reasoning_summary")
-                else "reasoning_text"
-                if event_type.startswith("response.reasoning_text")
-                else "reasoning"
+                else (
+                    "reasoning_text"
+                    if event_type.startswith("response.reasoning_text")
+                    else "reasoning"
+                )
             )
             key_parts = [family]
             for key in (
@@ -1134,7 +1178,9 @@ class _ResponsesEventAccumulator:
         output = list(base_output) if isinstance(base_output, list) else []
         if not output:
             output = list(self.output_items)
-        if self.text_parts and not any(item.get("type") == "message" for item in output):
+        if self.text_parts and not any(
+            item.get("type") == "message" for item in output
+        ):
             output.append(
                 {
                     "type": "message",
@@ -1395,9 +1441,7 @@ async def responses_events_to_chat_completions_sse(
         except StopAsyncIteration:
             break
         except Exception as exc:
-            error = _responses_error(
-                str(exc), code="upstream_stream_interrupted"
-            )
+            error = _responses_error(str(exc), code="upstream_stream_interrupted")
             yield f"data: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
@@ -1418,10 +1462,17 @@ async def responses_events_to_chat_completions_sse(
 
         # Temporary diagnostic: log every upstream event type
         if event_type and event_type not in ("response.output_text.delta",):
-            log.info("[RESPONSES SSE] event_type=%s keys=%s", event_type, sorted(event.keys()))
+            log.info(
+                "[RESPONSES SSE] event_type=%s keys=%s",
+                event_type,
+                sorted(event.keys()),
+            )
         # Extra: log full payload for any reasoning-related event
         if "reasoning" in event_type:
-            log.info("[RESPONSES SSE] REASONING_EVENT_FULL: %s", json.dumps(event, ensure_ascii=False, default=str)[:3000])
+            log.info(
+                "[RESPONSES SSE] REASONING_EVENT_FULL: %s",
+                json.dumps(event, ensure_ascii=False, default=str)[:3000],
+            )
 
         if event_type == "response.output_text.delta":
             delta = event.get("delta", "")
@@ -1480,9 +1531,7 @@ async def responses_events_to_chat_completions_sse(
             "response.reasoning_summary_part.done",
             "response.reasoning.done",
         ):
-            event_key = _reasoning_event_key(
-                event, _reasoning_event_family(event_type)
-            )
+            event_key = _reasoning_event_key(event, _reasoning_event_family(event_type))
             if event_key in reasoning_delta_seen:
                 continue
 
@@ -1535,7 +1584,11 @@ async def responses_events_to_chat_completions_sse(
             continue
 
         # Compatibility: tool calls and/or text can arrive as output items.
-        if event_type in ("response.output_item.added", "response.output_item.delta", "response.output_item.done"):
+        if event_type in (
+            "response.output_item.added",
+            "response.output_item.delta",
+            "response.output_item.done",
+        ):
             item = event.get("item") or event.get("delta") or {}
             if isinstance(item, dict):
                 item_type = item.get("type") or ""
@@ -1583,7 +1636,10 @@ async def responses_events_to_chat_completions_sse(
 
                 # Reasoning output item: extract any human-readable reasoning text
                 # the upstream includes on the item itself.
-                if item_type == "reasoning" and event_type in ("response.output_item.done", "response.output_item.added"):
+                if item_type == "reasoning" and event_type in (
+                    "response.output_item.done",
+                    "response.output_item.added",
+                ):
                     reasoning_text = _stringify_reasoning_content(
                         item.get("summary") or item.get("content") or item
                     )
@@ -1601,7 +1657,11 @@ async def responses_events_to_chat_completions_sse(
                         yield f"data: {json.dumps(make_chunk(reasoning_content=reasoning_text), ensure_ascii=False)}\n\n"
                     continue
 
-                if item_type == "message" and not saw_text_content and event_type == "response.output_item.done":
+                if (
+                    item_type == "message"
+                    and not saw_text_content
+                    and event_type == "response.output_item.done"
+                ):
                     # Fallback: extract text from final message content when deltas are missing.
                     content_items = item.get("content") or []
                     if isinstance(content_items, list):
@@ -1698,7 +1758,9 @@ async def responses_events_to_chat_completions_sse(
                 completed_tool_calls.sort(key=lambda item: int(item.get("index") or 0))
                 yield f"data: {json.dumps(make_chunk(tool_calls=completed_tool_calls), ensure_ascii=False)}\n\n"
             if completed_reasoning_texts and not saw_reasoning_content:
-                reasoning_text = "\n".join(part for part in completed_reasoning_texts if part)
+                reasoning_text = "\n".join(
+                    part for part in completed_reasoning_texts if part
+                )
                 if reasoning_text:
                     saw_content = True
                     saw_reasoning_content = True

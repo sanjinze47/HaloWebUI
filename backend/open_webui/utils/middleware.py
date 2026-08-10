@@ -394,7 +394,11 @@ def _get_file_item_meta(file_item: Any, nested_file: Optional[dict] = None) -> d
         return {}
     if isinstance(file_item.get("meta"), dict):
         return file_item.get("meta") or {}
-    nested_file = nested_file if isinstance(nested_file, dict) else _get_file_item_nested_file(file_item)
+    nested_file = (
+        nested_file
+        if isinstance(nested_file, dict)
+        else _get_file_item_nested_file(file_item)
+    )
     if isinstance(nested_file.get("meta"), dict):
         return nested_file.get("meta") or {}
     return {}
@@ -516,7 +520,9 @@ def _get_file_item_inline_text(file_item: Any, max_chars: int) -> str:
             text = _coerce_resource_text(data.get("content"), max_chars)
             if text:
                 return text
-        text = _coerce_resource_text(container.get("content") if isinstance(container, dict) else None, max_chars)
+        text = _coerce_resource_text(
+            container.get("content") if isinstance(container, dict) else None, max_chars
+        )
         if text:
             return text
 
@@ -550,12 +556,16 @@ def _is_archive_resource(name: str, media_type: str) -> bool:
     }
 
 
-def _get_current_chat_resource_access(file_item: Any, name: str, media_type: str) -> str:
+def _get_current_chat_resource_access(
+    file_item: Any, name: str, media_type: str
+) -> str:
     if not isinstance(file_item, dict):
         return "unsupported_binary"
 
     file_type = str(file_item.get("type") or "").strip().lower()
-    if file_type in {"image", "image_url", "input_image"} or media_type.startswith("image/"):
+    if file_type in {"image", "image_url", "input_image"} or media_type.startswith(
+        "image/"
+    ):
         return "visual_input"
 
     if _get_file_item_collection_name(file_item):
@@ -655,12 +665,17 @@ def _build_current_chat_resources_context(files: Any, prompt: Any) -> str:
 
         resources.append(resource)
 
-        if include_previews and preview_chars < _CURRENT_CHAT_RESOURCE_PREVIEW_TOTAL_MAX_CHARS:
+        if (
+            include_previews
+            and preview_chars < _CURRENT_CHAT_RESOURCE_PREVIEW_TOTAL_MAX_CHARS
+        ):
             preview = _build_lightweight_resource_preview(
                 file_item, _CURRENT_CHAT_RESOURCE_PREVIEW_MAX_CHARS
             )
             if preview:
-                remaining = _CURRENT_CHAT_RESOURCE_PREVIEW_TOTAL_MAX_CHARS - preview_chars
+                remaining = (
+                    _CURRENT_CHAT_RESOURCE_PREVIEW_TOTAL_MAX_CHARS - preview_chars
+                )
                 if len(preview) > remaining:
                     preview = preview[:remaining].rstrip() + "\n...[truncated]"
                 preview_chars += len(preview)
@@ -905,6 +920,8 @@ def _register_code_interpreter_generated_files(
             or mimetypes.guess_type(name)[0]
             or "application/octet-stream"
         )
+        if content_type == "application/x-zip-compressed":
+            content_type = "application/zip"
 
         file_path = None
         try:
@@ -1144,7 +1161,9 @@ def _finalize_reasoning_block_duration(
 
     duration = None
     if isinstance(started_at, (int, float)):
-        duration = _normalize_stream_reasoning_duration(finished_at - float(started_at))
+        started_duration = finished_at - float(started_at)
+        if started_duration >= 0.1 or not isinstance(fallback_started_at, (int, float)):
+            duration = _normalize_stream_reasoning_duration(started_duration)
 
     if duration is None and isinstance(fallback_started_at, (int, float)):
         duration = _normalize_stream_reasoning_duration(
@@ -1181,8 +1200,7 @@ def _get_tool_call_result(
 
     if (
         not normalized_tool_call_id
-        and
-        isinstance(fallback_index, int)
+        and isinstance(fallback_index, int)
         and 0 <= fallback_index < len(results)
         and isinstance(results[fallback_index], dict)
     ):
@@ -2566,9 +2584,7 @@ def _coerce_file_size_limit(value: Any) -> Optional[int]:
     if value is None or isinstance(value, bool):
         return None
     value = getattr(value, "value", value)
-    match = re.fullmatch(
-        r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I
-    )
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b)?\s*", str(value), re.I)
     if not match:
         return None
     try:
@@ -2738,7 +2754,11 @@ def _resolve_auto_chat_file_modes(
 
     metadata["auto_native_file_input_ids"] = auto_native_ids
     metadata["native_file_input_failure_strategy"] = normalize_file_failure_strategy(
-        api_config.get("file_failure_strategy") if isinstance(api_config, dict) else None,
+        (
+            api_config.get("file_failure_strategy")
+            if isinstance(api_config, dict)
+            else None
+        ),
         "strict" if official_openai else "compat",
     )
     metadata["native_file_input_connection_url"] = connection_url
@@ -4102,13 +4122,10 @@ async def chat_web_search_handler(
     def build_search_error_status(exc: Exception) -> dict:
         def is_duckduckgo_rate_limit_message(message: str) -> bool:
             normalized = message.lower()
-            return (
-                ("ratelimit" in normalized or "rate limit" in normalized)
-                and (
-                    "duckduckgo" in normalized
-                    or "lite.duckduckgo.com" in normalized
-                    or "duckduckgo_search" in normalized
-                )
+            return ("ratelimit" in normalized or "rate limit" in normalized) and (
+                "duckduckgo" in normalized
+                or "lite.duckduckgo.com" in normalized
+                or "duckduckgo_search" in normalized
             )
 
         detail = getattr(exc, "detail", None)
@@ -5201,7 +5218,10 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
         )
 
         filtered_model_id = str(form_data.get("model") or "").strip()
-        if filtered_model_id and filtered_model_id != str(model.get("id") or "").strip():
+        if (
+            filtered_model_id
+            and filtered_model_id != str(model.get("id") or "").strip()
+        ):
             resolved_model = resolve_model_from_lookup(
                 models,
                 getattr(request.state, "MODELS_AMBIGUOUS", set()) or set(),
@@ -5211,7 +5231,9 @@ async def process_chat_payload(request, form_data, user, metadata, model, tasks=
                 model = resolved_model
                 metadata["model"] = model
                 extra_params["__model__"] = model
-                log.debug("Updated chat model after inlet filters: %s", filtered_model_id)
+                log.debug(
+                    "Updated chat model after inlet filters: %s", filtered_model_id
+                )
     except Exception as e:
         raise Exception(f"Error: {e}")
 
@@ -7002,7 +7024,10 @@ async def process_chat_response(
                                                 or source_info.get("id")
                                                 or ""
                                             ).strip()
-                                            if source_url and source_url in emitted_url_citations:
+                                            if (
+                                                source_url
+                                                and source_url in emitted_url_citations
+                                            ):
                                                 continue
                                             if source_url:
                                                 emitted_url_citations.add(source_url)
@@ -7060,7 +7085,9 @@ async def process_chat_response(
                                 # URL citations (OpenAI-style delta annotations).
                                 annotations = delta.get("annotations")
                                 if isinstance(annotations, list) and annotations:
-                                    for citation in normalize_url_citations(annotations):
+                                    for citation in normalize_url_citations(
+                                        annotations
+                                    ):
                                         url = citation["url"]
                                         dedupe_key = url
                                         if dedupe_key in emitted_url_citations:

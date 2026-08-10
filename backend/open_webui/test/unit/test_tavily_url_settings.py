@@ -17,7 +17,11 @@ from open_webui.retrieval.web.tavily import (  # noqa: E402
     normalize_tavily_api_base_url,
     search_tavily,
 )
-from open_webui.routers.retrieval import ConfigForm, WebConfig, update_rag_config  # noqa: E402
+from open_webui.routers.retrieval import (
+    ConfigForm,
+    WebConfig,
+    update_rag_config,
+)  # noqa: E402
 
 
 def test_build_tavily_search_url_appends_endpoint_for_base_url():
@@ -74,6 +78,8 @@ def test_search_tavily_force_mode_uses_exact_url(monkeypatch):
     captured = {}
 
     class DummyResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 
@@ -103,6 +109,8 @@ def test_tavily_loader_appends_extract_endpoint(monkeypatch):
     captured = {}
 
     class DummyResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 

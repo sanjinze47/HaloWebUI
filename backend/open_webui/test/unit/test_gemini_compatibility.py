@@ -27,11 +27,7 @@ def test_structured_field_violations_are_classified(field, expected):
     body = {
         "error": {
             "details": [
-                {
-                    "fieldViolations": [
-                        {"field": field, "description": "Unknown field"}
-                    ]
-                }
+                {"fieldViolations": [{"field": field, "description": "Unknown field"}]}
             ],
         }
     }

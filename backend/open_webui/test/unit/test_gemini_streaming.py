@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pathlib
 import sys
@@ -22,18 +23,28 @@ def test_split_sse_events_keeps_remainder_without_requeue():
     assert remainder == "rest"
 
 
-def test_parse_gemini_json_objects_skips_invalid_event_and_summarizes_warnings(monkeypatch):
+def test_parse_gemini_json_objects_skips_invalid_event_and_summarizes_warnings(
+    monkeypatch,
+):
     warnings = []
-    monkeypatch.setattr(gemini_router.log, "warning", lambda message: warnings.append(message))
+    monkeypatch.setattr(
+        gemini_router.log, "warning", lambda message: warnings.append(message)
+    )
 
     limiter = gemini_router._StreamWarningLimiter("stream-1", per_key_limit=1)
 
-    assert gemini_router._parse_gemini_json_objects(
-        "{", warning_limiter=limiter, phase="event"
-    ) == []
-    assert gemini_router._parse_gemini_json_objects(
-        "{", warning_limiter=limiter, phase="event"
-    ) == []
+    assert (
+        gemini_router._parse_gemini_json_objects(
+            "{", warning_limiter=limiter, phase="event"
+        )
+        == []
+    )
+    assert (
+        gemini_router._parse_gemini_json_objects(
+            "{", warning_limiter=limiter, phase="event"
+        )
+        == []
+    )
 
     limiter.flush()
 
@@ -43,7 +54,9 @@ def test_parse_gemini_json_objects_skips_invalid_event_and_summarizes_warnings(m
 
 def test_parse_gemini_json_objects_skips_non_dict_values(monkeypatch):
     warnings = []
-    monkeypatch.setattr(gemini_router.log, "warning", lambda message: warnings.append(message))
+    monkeypatch.setattr(
+        gemini_router.log, "warning", lambda message: warnings.append(message)
+    )
 
     payload = (
         '"error" '
@@ -54,7 +67,10 @@ def test_parse_gemini_json_objects_skips_non_dict_values(monkeypatch):
 
     assert len(objs) == 1
     assert objs[0]["candidates"][0]["content"]["parts"][0]["text"] == "hello"
-    assert any("Skipping non-dict Gemini stream payload (str): error" in warning for warning in warnings)
+    assert any(
+        "Skipping non-dict Gemini stream payload (str): error" in warning
+        for warning in warnings
+    )
 
 
 def test_image_chunks_use_delta_image_protocol():
@@ -70,7 +86,10 @@ def test_image_chunks_use_delta_image_protocol():
 
     assert decoded[0]["choices"][0]["delta"]["image"]["id"].startswith("img_")
     assert decoded[-1]["choices"][0]["delta"]["image"]["final"] is True
-    assert "".join(chunk["choices"][0]["delta"]["image"]["data"] for chunk in decoded) == "abcdefgh"
+    assert (
+        "".join(chunk["choices"][0]["delta"]["image"]["data"] for chunk in decoded)
+        == "abcdefgh"
+    )
 
 
 def test_build_stream_chunks_from_gemini_obj_emits_image_delta_and_finish():
@@ -85,7 +104,11 @@ def test_build_stream_chunks_from_gemini_obj_emits_image_delta_and_finish():
                 }
             }
         ],
-        "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 2, "totalTokenCount": 3},
+        "usageMetadata": {
+            "promptTokenCount": 1,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 3,
+        },
     }
 
     chunks, _next_index, finished = gemini_router._build_stream_chunks_from_gemini_obj(
@@ -138,10 +161,18 @@ def test_build_stream_chunks_ignore_thought_inline_images():
                 "content": {
                     "parts": [
                         {
-                            "inlineData": {"mimeType": "image/png", "data": "thought-image"},
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": "thought-image",
+                            },
                             "thought": True,
                         },
-                        {"inlineData": {"mimeType": "image/png", "data": "final-image"}},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": "final-image",
+                            }
+                        },
                     ]
                 }
             }
@@ -158,7 +189,9 @@ def test_build_stream_chunks_ignore_thought_inline_images():
     )
 
     decoded = [_decode_sse_chunk(chunk) for chunk in chunks]
-    image_chunks = [chunk for chunk in decoded if chunk["choices"][0]["delta"].get("image")]
+    image_chunks = [
+        chunk for chunk in decoded if chunk["choices"][0]["delta"].get("image")
+    ]
 
     assert len(image_chunks) == 1
     assert image_chunks[0]["choices"][0]["delta"]["image"]["data"] == "final-image"
@@ -247,9 +280,7 @@ def test_gemini_auto_retries_only_the_rejected_optional_capability():
 
 
 def test_gemini_strict_and_required_capabilities_do_not_retry():
-    error_body = {
-        "error": {"message": "thinkingConfig is not supported by this model"}
-    }
+    error_body = {"error": {"message": "thinkingConfig is not supported by this model"}}
 
     for mode, required in (("strict", set()), ("auto", {"thinking"})):
         first = _CompatResponse(400, error_body)
@@ -260,9 +291,7 @@ def test_gemini_strict_and_required_capabilities_do_not_retry():
                 [("https://example.test/generateContent", {})],
                 {
                     "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
-                    "generationConfig": {
-                        "thinkingConfig": {"thinkingBudget": 1024}
-                    },
+                    "generationConfig": {"thinkingConfig": {"thinkingBudget": 1024}},
                 },
                 log_prefix="test",
                 compatibility_mode=mode,

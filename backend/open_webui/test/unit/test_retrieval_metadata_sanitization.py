@@ -45,9 +45,7 @@ def _build_request():
     )
     state = SimpleNamespace(
         config=config,
-        EMBEDDING_FUNCTION=lambda texts, prefix, user=None: [
-            [0.1, 0.2] for _ in texts
-        ],
+        EMBEDDING_FUNCTION=lambda texts, prefix, user=None: [[0.1, 0.2] for _ in texts],
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 

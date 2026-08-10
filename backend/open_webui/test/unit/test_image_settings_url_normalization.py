@@ -784,7 +784,10 @@ def test_image_settings_source_does_not_inherit_global_openai_auth_config_when_k
 
     assert source is not None
     assert source["key"] == "image-key"
-    assert source["api_config"] == {}
+    assert set(source["api_config"]) == {"api_key_pool"}
+    assert [entry["key"] for entry in source["api_config"]["api_key_pool"]["keys"]] == [
+        "image-key"
+    ]
 
 
 def test_image_runtime_shared_source_keeps_image_force_mode_while_merging_global_config():
@@ -907,7 +910,7 @@ def test_image_settings_source_normalizes_legacy_openai_base_url_without_v1():
 
     assert source is not None
     assert source["base_url"] == "https://api.example.com/v1"
-    assert source["api_config"] == {}
+    assert source["key"] == "image-key"
 
 
 def test_sync_image_provider_config_state_persists_normalized_legacy_urls():
@@ -1457,11 +1460,13 @@ def test_runtime_image_models_regex_filter_still_applies_to_final_list():
 
 def test_image_model_search_results_bypass_saved_regex_filter(monkeypatch):
     request = SimpleNamespace(
+        state=SimpleNamespace(),
+        query_params={},
         app=SimpleNamespace(
             state=SimpleNamespace(
                 config=SimpleNamespace(IMAGE_MODEL_FILTER_REGEX="gpt-image")
             )
-        )
+        ),
     )
     user = SimpleNamespace(id="admin", role="admin")
 

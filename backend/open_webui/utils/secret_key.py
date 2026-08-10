@@ -34,13 +34,13 @@ def _read_key(path: Path) -> str:
     try:
         return _validate_key(path.read_text(encoding="utf-8"), path)
     except OSError as exc:
-        raise SecretKeyError(f"Unable to read WEBUI secret key from {path}: {exc}") from exc
+        raise SecretKeyError(
+            f"Unable to read WEBUI secret key from {path}: {exc}"
+        ) from exc
 
 
 def _write_key_atomic(path: Path, value: str) -> None:
-    temporary = path.with_name(
-        f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
-    )
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     try:
         with temporary.open("x", encoding="utf-8") as stream:
             stream.write(value)
@@ -54,7 +54,9 @@ def _write_key_atomic(path: Path, value: str) -> None:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
-        raise SecretKeyError(f"Unable to persist WEBUI secret key to {path}: {exc}") from exc
+        raise SecretKeyError(
+            f"Unable to persist WEBUI secret key to {path}: {exc}"
+        ) from exc
 
 
 def resolve_webui_secret_key(

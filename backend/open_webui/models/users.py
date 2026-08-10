@@ -54,6 +54,7 @@ class UserSettingsRevisionConflict(Exception):
         self.current_revision = current_revision
         super().__init__("User settings revision conflict")
 
+
 ####################
 # User DB Schema
 ####################
@@ -429,12 +430,14 @@ class UsersTable:
             try:
                 if operation() is False:
                     failures.append(
-                        {"type": resource_type, "id": id, "error": "operation returned false"}
+                        {
+                            "type": resource_type,
+                            "id": id,
+                            "error": "operation returned false",
+                        }
                     )
             except Exception as exc:
-                failures.append(
-                    {"type": resource_type, "id": id, "error": str(exc)}
-                )
+                failures.append({"type": resource_type, "id": id, "error": str(exc)})
         return failures
 
     def delete_user_record_by_id(self, id: str) -> bool:

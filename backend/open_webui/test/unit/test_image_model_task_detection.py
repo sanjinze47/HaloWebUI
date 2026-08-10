@@ -73,7 +73,10 @@ def test_fallback_chat_title_uses_concise_user_prompt_snippet():
     title = build_fallback_chat_title(
         [
             {"role": "system", "content": "忽略"},
-            {"role": "user", "content": "  生成一张橘猫在吃粮的照片，真实手机高清拍照视角  "},
+            {
+                "role": "user",
+                "content": "  生成一张橘猫在吃粮的照片，真实手机高清拍照视角  ",
+            },
             {"role": "assistant", "content": "已生成图片"},
         ]
     )
@@ -95,7 +98,9 @@ def test_fallback_chat_title_trims_to_sidebar_length():
     assert len(title) <= 15
 
 
-def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(monkeypatch):
+def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(
+    monkeypatch,
+):
     message_map = {
         "user-1": {
             "id": "user-1",
@@ -120,7 +125,7 @@ def test_image_generation_title_falls_back_to_user_prompt_when_title_task_fails(
     async def fake_generate_title(*_args, **_kwargs):
         return JSONResponse(status_code=400, content={"detail": "image model"})
 
-    def fake_upsert_message(_chat_id, message_id, message):
+    def fake_upsert_message(_chat_id, message_id, message, **_kwargs):
         message_map[message_id] = {
             **message_map.get(message_id, {}),
             **message,
@@ -213,7 +218,9 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
         pass
 
     async def fake_generate_title(*_args, **_kwargs):
-        raise AssertionError("image sessions should not call the image model for title text")
+        raise AssertionError(
+            "image sessions should not call the image model for title text"
+        )
 
     monkeypatch.setattr(middleware, "generate_title", fake_generate_title)
     monkeypatch.setattr(
@@ -232,7 +239,9 @@ def test_image_generation_title_skips_model_call_and_uses_fallback(monkeypatch):
     monkeypatch.setattr(
         middleware.Chats,
         "upsert_message_to_chat_by_id_and_message_id",
-        lambda _chat_id, message_id, message: message_map[message_id].update(message),
+        lambda _chat_id, message_id, message, **_kwargs: message_map[message_id].update(
+            message
+        ),
     )
     monkeypatch.setattr(
         middleware.Chats,
@@ -317,7 +326,9 @@ def test_dedicated_image_model_uses_current_chat_model_before_admin_default():
             ),
             state=SimpleNamespace(),
         )
-        user = SimpleNamespace(id="user-1", email="u@example.com", name="User", role="admin")
+        user = SimpleNamespace(
+            id="user-1", email="u@example.com", name="User", role="admin"
+        )
         metadata = {}
         form_data = {
             "model": "13eca07c.gemini-3.1-flash-image-preview",
@@ -346,9 +357,14 @@ def test_dedicated_image_model_uses_current_chat_model_before_admin_default():
     finally:
         middleware.process_filter_functions = original_process_filter_functions
         middleware.get_sorted_filters = original_get_sorted_filters
-        middleware.chat_image_generation_handler = original_chat_image_generation_handler
+        middleware.chat_image_generation_handler = (
+            original_chat_image_generation_handler
+        )
 
-    assert captured["image_generation_options"]["model"] == "gemini-3.1-flash-image-preview"
+    assert (
+        captured["image_generation_options"]["model"]
+        == "gemini-3.1-flash-image-preview"
+    )
     assert captured["image_generation_options"]["model_ref"] == {
         "provider": "openai",
         "source": "personal",

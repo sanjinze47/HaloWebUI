@@ -10,9 +10,7 @@ CHAT_COMPLETION_TOKEN_PARAMETERS = {
 
 def resolve_chat_completion_token_parameter(api_config: Optional[dict]) -> str:
     config = api_config if isinstance(api_config, dict) else {}
-    mode = str(
-        config.get("chat_completion_token_parameter") or "auto"
-    ).strip().lower()
+    mode = str(config.get("chat_completion_token_parameter") or "auto").strip().lower()
     if mode not in CHAT_COMPLETION_TOKEN_PARAMETERS:
         allowed = ", ".join(sorted(CHAT_COMPLETION_TOKEN_PARAMETERS))
         raise ValueError(
@@ -42,9 +40,7 @@ def apply_chat_completion_token_parameter(
         selected = mode
 
     other = (
-        "max_tokens"
-        if selected == "max_completion_tokens"
-        else "max_completion_tokens"
+        "max_tokens" if selected == "max_completion_tokens" else "max_completion_tokens"
     )
     if selected not in payload and other in payload:
         payload[selected] = payload[other]

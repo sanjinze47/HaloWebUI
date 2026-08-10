@@ -143,7 +143,9 @@ class FilesTable:
         with get_db() as db:
             try:
                 file = db.get(File, id)
-                if not file or (not include_pending and self._is_pending_deletion(file)):
+                if not file or (
+                    not include_pending and self._is_pending_deletion(file)
+                ):
                     return None
                 return FileModel.model_validate(file)
             except Exception:
@@ -155,7 +157,9 @@ class FilesTable:
         with get_db() as db:
             try:
                 file = db.get(File, id)
-                if not file or (not include_pending and self._is_pending_deletion(file)):
+                if not file or (
+                    not include_pending and self._is_pending_deletion(file)
+                ):
                     return None
                 return FileMetadataResponse(
                     id=file.id,

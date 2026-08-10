@@ -9,9 +9,9 @@ def resolve_gemini_compatibility_mode(
     api_config: Optional[dict], *, legacy_default: str = "auto"
 ) -> str:
     config = api_config if isinstance(api_config, dict) else {}
-    mode = str(
-        config.get("gemini_compatibility_mode") or legacy_default
-    ).strip().lower()
+    mode = (
+        str(config.get("gemini_compatibility_mode") or legacy_default).strip().lower()
+    )
     if mode not in GEMINI_COMPATIBILITY_MODES:
         allowed = ", ".join(sorted(GEMINI_COMPATIBILITY_MODES))
         raise ValueError(
@@ -20,9 +20,7 @@ def resolve_gemini_compatibility_mode(
     return mode
 
 
-def classify_unsupported_gemini_capability(
-    status: int, body: Any
-) -> Optional[str]:
+def classify_unsupported_gemini_capability(status: int, body: Any) -> Optional[str]:
     if status != 400:
         return None
 
@@ -43,9 +41,7 @@ def classify_unsupported_gemini_capability(
         if isinstance(details, list):
             for detail in details:
                 field_violations = (
-                    detail.get("fieldViolations")
-                    if isinstance(detail, dict)
-                    else None
+                    detail.get("fieldViolations") if isinstance(detail, dict) else None
                 )
                 if isinstance(field_violations, list):
                     violations.extend(
