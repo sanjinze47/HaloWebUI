@@ -9,6 +9,14 @@ log = logging.getLogger(__name__)
 RESPONSES_COMPATIBILITY_MODES = {"standard", "sub2api", "custom"}
 SUB2API_DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
 RESPONSES_TRANSPORT_DONE_EVENT = "__halo_responses_transport_done__"
+_RESPONSES_TERMINAL_EVENT_TYPES = {
+    "response.completed",
+    "response.done",
+    "response.failed",
+    "response.incomplete",
+    "response.cancelled",
+    "response.canceled",
+}
 
 
 class ResponsesCompatibilityError(ValueError):
@@ -51,6 +59,13 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
         .strip()
         .lower()
     )
+    # `response.created` and `response.in_progress` legitimately carry an
+    # in-progress response. Only a direct response object or a terminal event
+    # may be validated as an incomplete response.
+    is_terminal_event = event_type in _RESPONSES_TERMINAL_EVENT_TYPES
+    validate_response_status = (
+        not event_type.startswith("response.") or is_terminal_event
+    )
     if event_type in {"response.completed", "response.done"} and status in {
         "failed",
         "incomplete",
@@ -74,12 +89,12 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
             code=value.get("code") or response_obj.get("code"),
         )
 
-    if status == "failed":
+    if validate_response_status and status == "failed":
         return _responses_error(
             response_obj.get("message") or value.get("message"),
             code=response_obj.get("code") or value.get("code"),
         )
-    if status == "incomplete":
+    if validate_response_status and status == "incomplete":
         details = response_obj.get("incomplete_details") or value.get(
             "incomplete_details"
         )
@@ -88,11 +103,11 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
             reason or "The upstream response was incomplete.",
             code="response_incomplete",
         )
-    if status == "cancelled":
+    if validate_response_status and status == "cancelled":
         return _responses_error(
             "The upstream response was cancelled.", code="response_cancelled"
         )
-    if status in {"queued", "in_progress"}:
+    if validate_response_status and status in {"queued", "in_progress"}:
         return _responses_error(
             "The upstream returned a response that was not completed.",
             code="response_not_completed",
