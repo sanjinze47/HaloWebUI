@@ -60,12 +60,15 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
         .lower()
     )
     # `response.created` and `response.in_progress` legitimately carry an
-    # in-progress response. Only a direct response object or a terminal event
-    # may be validated as an incomplete response.
+    # in-progress response. Some compatibility gateways also emit a terminal
+    # event with a stale in-progress response status; the terminal event type
+    # is authoritative in that case, while direct response objects remain
+    # subject to the incomplete-response check.
     is_terminal_event = event_type in _RESPONSES_TERMINAL_EVENT_TYPES
-    validate_response_status = (
+    validate_terminal_status = (
         not event_type.startswith("response.") or is_terminal_event
     )
+    validate_not_completed_status = not event_type.startswith("response.")
     if event_type in {"response.completed", "response.done"} and status in {
         "failed",
         "incomplete",
@@ -89,12 +92,12 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
             code=value.get("code") or response_obj.get("code"),
         )
 
-    if validate_response_status and status == "failed":
+    if validate_terminal_status and status == "failed":
         return _responses_error(
             response_obj.get("message") or value.get("message"),
             code=response_obj.get("code") or value.get("code"),
         )
-    if validate_response_status and status == "incomplete":
+    if validate_terminal_status and status == "incomplete":
         details = response_obj.get("incomplete_details") or value.get(
             "incomplete_details"
         )
@@ -103,11 +106,11 @@ def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
             reason or "The upstream response was incomplete.",
             code="response_incomplete",
         )
-    if validate_response_status and status == "cancelled":
+    if validate_terminal_status and status == "cancelled":
         return _responses_error(
             "The upstream response was cancelled.", code="response_cancelled"
         )
-    if validate_response_status and status in {"queued", "in_progress"}:
+    if validate_not_completed_status and status in {"queued", "in_progress"}:
         return _responses_error(
             "The upstream returned a response that was not completed.",
             code="response_not_completed",
@@ -1466,6 +1469,19 @@ async def responses_events_to_chat_completions_sse(
 
         error = normalize_responses_error(event)
         if error:
+            response = event.get("response")
+            response_status = (
+                response.get("status")
+                if isinstance(response, dict)
+                else event.get("status")
+            )
+            log.warning(
+                "[RESPONSES SSE] normalized upstream error event_type=%s response_status=%s response_keys=%s error_code=%s",
+                event.get("type"),
+                response_status,
+                sorted(response.keys()) if isinstance(response, dict) else [],
+                error.get("code"),
+            )
             yield f"data: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return

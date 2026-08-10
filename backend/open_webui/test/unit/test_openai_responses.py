@@ -426,6 +426,28 @@ def test_responses_progress_events_do_not_fail_as_incomplete():
     assert lines[-1].strip() == "data: [DONE]"
 
 
+def test_terminal_event_wins_over_stale_in_progress_status():
+    events = [
+        {"type": "response.output_text.delta", "delta": "Hello"},
+        {
+            "type": "response.done",
+            "response": {"status": "in_progress"},
+        },
+    ]
+
+    async def run():
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(
+                _aiter(events), model_id="gpt-test"
+            )
+        )
+
+    lines = asyncio.run(run())
+    assert any('"content": "Hello"' in line for line in lines)
+    assert not any("response_not_completed" in line for line in lines)
+    assert lines[-1].strip() == "data: [DONE]"
+
+
 def test_responses_stream_raw_eof_is_an_error_not_a_success_finish():
     async def run():
         events = _aiter([{"type": "response.output_text.delta", "delta": "partial"}])
