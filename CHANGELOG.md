@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-10
+
+### Changed
+
+- Replaced overlapping citation controls with a compact source strip and a unified responsive detail drawer for links, excerpts, and local documents.
+
+### Fixed
+
+- Applied per-model built-in web search preferences when model metadata loads after a new chat is initialized.
+
 ## [0.2.4] - 2026-08-10
 
 ### Fixed
