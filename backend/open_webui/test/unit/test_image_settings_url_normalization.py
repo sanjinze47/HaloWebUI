@@ -2769,6 +2769,210 @@ def test_openai_gpt_image_edit_payload_uses_streaming(monkeypatch):
     assert "response_format" not in captured["form_fields"]
 
 
+def test_grok2api_image_edit_payload_uses_json_data_urls(monkeypatch):
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1", role="admin")
+    captured = {}
+
+    monkeypatch.setattr(
+        images_router, "_build_openai_image_headers", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        images_router,
+        "_resolve_image_edit_input",
+        lambda _request, _user, url: (
+            "image/png",
+            b"first-image" if url.endswith("first") else b"second-image",
+        ),
+    )
+
+    def fake_upload(_request, metadata, *_args, **_kwargs):
+        captured["upload_metadata"] = metadata
+        return "/api/v1/files/generated"
+
+    monkeypatch.setattr(images_router, "upload_image", fake_upload)
+
+    async def fake_send(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": 200,
+            "headers": {},
+            "response_body": '{"data":[{"b64_json":"YWJj"}]}',
+        }
+
+    monkeypatch.setattr(images_router, "_send_openai_image_request", fake_send)
+
+    result = asyncio.run(
+        images_router._generate_via_openai_image_edits_endpoint(
+            request,
+            user,
+            model_id="grok-imagine-image",
+            prompt="change the subject",
+            image_url="/api/v1/files/first",
+            image_urls=[
+                "/api/v1/files/first",
+                "/api/v1/files/second",
+            ],
+            n=1,
+            size="1024x1024",
+            background="transparent",
+            source={
+                "base_url": "https://relay.example.com/v1",
+                "key": "key-a",
+                "api_config": {"image_edit_compatibility": "grok2api"},
+            },
+        )
+    )
+
+    assert result == [{"url": "/api/v1/files/generated"}]
+    assert captured["request_kind"] == "json"
+    assert captured["url"] == "https://relay.example.com/v1/images/edits"
+    assert captured["json_body"] == {
+        "model": "grok-imagine-image",
+        "prompt": "change the subject",
+        "n": 1,
+        "size": "1024x1024",
+        "response_format": "b64_json",
+        "image": {"url": "data:image/png;base64,Zmlyc3QtaW1hZ2U="},
+        "images": [
+            {"url": "data:image/png;base64,c2Vjb25kLWltYWdl"},
+        ],
+    }
+    assert "files" not in captured
+    assert "form_fields" not in captured
+    assert "image" not in captured["upload_metadata"]
+    assert "images" not in captured["upload_metadata"]
+
+
+def test_grok2api_image_edit_preserves_upstream_error(monkeypatch):
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1", role="admin")
+    captured = {}
+
+    monkeypatch.setattr(
+        images_router, "_build_openai_image_headers", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        images_router,
+        "_resolve_image_edit_input",
+        lambda *_args, **_kwargs: ("image/png", b"source-image"),
+    )
+
+    async def fake_send(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": 415,
+            "headers": {"content-type": "application/json"},
+            "response_body": '{"error":{"message":"Unsupported Media Type"}}',
+        }
+
+    monkeypatch.setattr(images_router, "_send_openai_image_request", fake_send)
+
+    try:
+        asyncio.run(
+            images_router._generate_via_openai_image_edits_endpoint(
+                request,
+                user,
+                model_id="grok-imagine-image-quality",
+                prompt="change the subject",
+                image_url="/api/v1/files/source/content",
+                n=1,
+                size=None,
+                background=None,
+                source={
+                    "base_url": "https://relay.example.com/v1",
+                    "key": "key-a",
+                    "api_config": {"image_edit_compatibility": "grok2api"},
+                },
+            )
+        )
+        assert False, "grok2api upstream errors must be surfaced"
+    except HTTPException as exc:
+        assert exc.status_code == 415
+        assert "HTTP 415" in str(exc.detail)
+        assert "Unsupported Media Type" in str(exc.detail)
+
+    assert captured["request_kind"] == "json"
+    assert captured["json_body"]["model"] == "grok-imagine-image-quality"
+
+
+def test_standard_grok_named_image_edit_stays_multipart(monkeypatch):
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1", role="admin")
+    captured = {}
+
+    monkeypatch.setattr(
+        images_router, "_build_openai_image_headers", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        images_router,
+        "_resolve_image_edit_input",
+        lambda *_args, **_kwargs: ("image/png", b"source-image"),
+    )
+    monkeypatch.setattr(
+        images_router,
+        "upload_image",
+        lambda *_args, **_kwargs: "/api/v1/files/generated",
+    )
+
+    async def fake_send(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": 200,
+            "headers": {},
+            "response_body": '{"data":[{"b64_json":"YWJj"}]}',
+        }
+
+    monkeypatch.setattr(images_router, "_send_openai_image_request", fake_send)
+
+    result = asyncio.run(
+        images_router._generate_via_openai_image_edits_endpoint(
+            request,
+            user,
+            model_id="grok-imagine-image",
+            prompt="change the subject",
+            image_url="/api/v1/files/source/content",
+            n=1,
+            size=None,
+            background=None,
+            source={
+                "base_url": "https://api.x.ai/v1",
+                "key": "key-a",
+                "api_config": {"image_edit_compatibility": "standard"},
+            },
+        )
+    )
+
+    assert result == [{"url": "/api/v1/files/generated"}]
+    assert captured["request_kind"] == "multipart"
+    assert captured["form_fields"]["model"] == "grok-imagine-image"
+    assert captured["files"][0]["field_name"] == "image"
+    assert "json_body" not in captured
+
+
+def test_generated_loopback_image_urls_use_configured_connection_origin(monkeypatch):
+    loaded_urls = []
+
+    def fake_load(url, headers=None, allowed_base_urls=None):
+        loaded_urls.append(url)
+        return b"image-bytes", "image/png"
+
+    monkeypatch.setattr(images_router, "load_url_image_data", fake_load)
+
+    for hostname in ("localhost", "127.0.0.1", "[::1]"):
+        loaded = images_router._load_generated_image_from_value(
+            f"http://{hostname}:8000/files/generated.png?token=abc#preview",
+            allowed_base_urls=["https://grok.example.com:9443/v1"],
+        )
+        assert loaded == (b"image-bytes", "image/png")
+
+    assert loaded_urls == [
+        "https://grok.example.com:9443/files/generated.png?token=abc#preview",
+        "https://grok.example.com:9443/files/generated.png?token=abc#preview",
+        "https://grok.example.com:9443/files/generated.png?token=abc#preview",
+    ]
+
+
 def test_openai_image_split_batch_reports_partial_successes():
     async def run_single(index: int):
         if index in {2, 3}:

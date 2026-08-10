@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -99,6 +100,27 @@ from open_webui.utils.access_control import has_access
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
+
+OPENAI_IMAGE_EDIT_COMPATIBILITY_MODES = {"standard", "grok2api"}
+
+
+def resolve_openai_image_edit_compatibility(config: Optional[dict]) -> str:
+    config = config if isinstance(config, dict) else {}
+    configured_mode = config.get("image_edit_compatibility")
+    if configured_mode is None:
+        legacy_name = str(config.get("remark") or config.get("name") or "").strip()
+        if re.search(r"(?<![a-z0-9])grok2api(?![a-z0-9])", legacy_name, re.I):
+            return "grok2api"
+        return "standard"
+
+    mode = str(configured_mode).strip().lower()
+    if mode not in OPENAI_IMAGE_EDIT_COMPATIBILITY_MODES:
+        allowed = ", ".join(sorted(OPENAI_IMAGE_EDIT_COMPATIBILITY_MODES))
+        raise ValueError(
+            f"Invalid image edit compatibility mode {mode!r}; expected one of: {allowed}."
+        )
+    return mode
+
 
 OPENAI_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 AZURE_OPENAI_V1_SEGMENT = "/openai/v1"
@@ -1720,6 +1742,7 @@ def _validate_openai_api_configs(configs: Any) -> None:
             raise ValueError("Each OpenAI API config must be an object.")
         resolve_responses_compatibility(config)
         resolve_chat_completion_token_parameter(config)
+        resolve_openai_image_edit_compatibility(config)
 
 
 ##########################################

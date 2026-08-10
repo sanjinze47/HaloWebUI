@@ -197,6 +197,10 @@ OPENAI_IMAGE_ROUTE_EDITS = "edits"
 OPENAI_IMAGE_ROUTE_CHAT = "chat"
 OPENAI_IMAGE_ROUTE_RESPONSES = "responses"
 OPENAI_IMAGE_ROUTE_AUTO = "auto"
+GROK2API_JSON_IMAGE_EDIT_MODELS = {
+    "grok-imagine-image",
+    "grok-imagine-image-quality",
+}
 VOLCENGINE_IMAGES_ENDPOINT_HINTS = ("seedream", "seededit")
 OPENAI_CHAT_IMAGE_HINTS = (
     "chatgpt-image",
@@ -953,9 +957,17 @@ def _should_offer_openai_image_edit_route(
     *,
     base_name: str,
     generation_mode: str,
+    api_config: Optional[dict] = None,
     endpoint_routes: Optional[set[str]] = None,
 ) -> bool:
     routes = endpoint_routes or set()
+    if (
+        generation_mode == "openai_images"
+        and base_name in GROK2API_JSON_IMAGE_EDIT_MODELS
+        and openai_router.resolve_openai_image_edit_compatibility(api_config)
+        == "grok2api"
+    ):
+        return True
     if routes:
         return OPENAI_IMAGE_ROUTE_EDITS in routes
     if generation_mode != "openai_images":
@@ -1038,11 +1050,15 @@ def _is_openai_image_edit_compatible_model(*values: str) -> bool:
 
 
 def _is_openai_image_reference_edit_default_model(*values: str) -> bool:
-    return any(
-        OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE.search(str(value or "").lower())
-        for value in values
-        if str(value or "").strip()
-    )
+    for value in values:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            continue
+        if _model_id_basename(normalized) in GROK2API_JSON_IMAGE_EDIT_MODELS:
+            return True
+        if OPENAI_IMAGE_REFERENCE_EDIT_DEFAULT_MODEL_RE.search(normalized):
+            return True
+    return False
 
 
 def _openai_image_model_has_default_response_format(model_id: str) -> bool:
@@ -1342,13 +1358,18 @@ def _apply_image_model_owner_context(
         owner_id = owner_id or (getattr(model, "user_id", None) if model else None)
         if not owner_id:
             for candidate in Models.get_models():
-                if str(getattr(candidate, "base_model_id", "") or "").strip() == normalized_model_id:
+                if (
+                    str(getattr(candidate, "base_model_id", "") or "").strip()
+                    == normalized_model_id
+                ):
                     owner_id = getattr(candidate, "user_id", None)
                     break
         if owner_id and owner_id != getattr(user, "id", None):
             owner = Users.get_user_by_id(owner_id)
             if owner:
-                from open_webui.utils.user_connections import maybe_migrate_user_connections
+                from open_webui.utils.user_connections import (
+                    maybe_migrate_user_connections,
+                )
 
                 request.state.connection_user = maybe_migrate_user_connections(
                     request, owner
@@ -1591,6 +1612,10 @@ def _build_image_model_cache_key(engine: str, source: Optional[dict[str, Any]]) 
         "model_ids": _normalize_config_model_ids(source.get("api_config")),
         "force_mode": bool((source.get("api_config") or {}).get("force_mode")),
         "auth_type": (source.get("api_config") or {}).get("auth_type"),
+        "image_edit_compatibility": (source.get("api_config") or {}).get(
+            "image_edit_compatibility"
+        ),
+        "connection_name": source.get("connection_name"),
     }
     return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
@@ -1941,6 +1966,7 @@ def _build_image_model_entry(
         and _should_offer_openai_image_edit_route(
             base_name=_model_id_basename(model_id).lower(),
             generation_mode=generation_mode,
+            api_config=(source.get("api_config") if isinstance(source, dict) else None),
             endpoint_routes=(
                 set(normalized_routes) if has_explicit_supported_routes else set()
             ),
@@ -2132,6 +2158,7 @@ def _classify_openai_image_model(
         _should_offer_openai_image_edit_route(
             base_name=base_name,
             generation_mode=generation_mode,
+            api_config=api_config,
             endpoint_routes=endpoint_routes,
         )
         and OPENAI_IMAGE_ROUTE_EDITS not in supported_image_routes
@@ -3652,9 +3679,7 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         },
         "comfyui": {
             "COMFYUI_BASE_URL": request.app.state.config.COMFYUI_BASE_URL,
-            "COMFYUI_API_KEY": _secret_status(
-                request.app.state.config.COMFYUI_API_KEY
-            ),
+            "COMFYUI_API_KEY": _secret_status(request.app.state.config.COMFYUI_API_KEY),
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
         },
@@ -3896,9 +3921,7 @@ async def update_config(
         },
         "comfyui": {
             "COMFYUI_BASE_URL": request.app.state.config.COMFYUI_BASE_URL,
-            "COMFYUI_API_KEY": _secret_status(
-                request.app.state.config.COMFYUI_API_KEY
-            ),
+            "COMFYUI_API_KEY": _secret_status(request.app.state.config.COMFYUI_API_KEY),
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
         },
@@ -4278,9 +4301,7 @@ def _parse_natural_image_size(prompt: Optional[str]) -> Optional[str]:
         return None
 
     # Accept both the ASCII x and the multiplication sign users commonly type.
-    unicode_size = re.search(
-        r"(?<!\d)(\d{2,5})\s*(?:x|\u00d7)\s*(\d{2,5})(?!\d)", text
-    )
+    unicode_size = re.search(r"(?<!\d)(\d{2,5})\s*(?:x|\u00d7)\s*(\d{2,5})(?!\d)", text)
     if unicode_size:
         return f"{int(unicode_size.group(1))}x{int(unicode_size.group(2))}"
 
@@ -4314,7 +4335,9 @@ def _validate_gpt_image_2_size(size: Optional[str]) -> Optional[str]:
     try:
         width, height = (int(value) for value in normalized.split("x", 1))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="GPT Image 2 size must be WIDTHxHEIGHT.")
+        raise HTTPException(
+            status_code=400, detail="GPT Image 2 size must be WIDTHxHEIGHT."
+        )
 
     constraints = GPT_IMAGE_2_SIZE_CONSTRAINTS
     ratio = max(width, height) / min(width, height) if min(width, height) else 0
@@ -4440,6 +4463,45 @@ def _is_valid_plain_base64(value: str) -> bool:
         return False
 
 
+def _rewrite_loopback_generated_image_url(
+    url: str, allowed_base_urls: Optional[list[str]] = None
+) -> str:
+    parsed = urlparse(str(url or "").strip())
+    hostname = str(parsed.hostname or "").lower()
+    if parsed.scheme.lower() not in {"http", "https"} or not hostname:
+        return url
+
+    is_loopback = hostname == "localhost"
+    if not is_loopback:
+        try:
+            import ipaddress
+
+            address = ipaddress.ip_address(hostname)
+            is_loopback = address.is_loopback or address.is_unspecified
+        except ValueError:
+            pass
+    if not is_loopback:
+        return url
+
+    for base_url in allowed_base_urls or []:
+        try:
+            base = urlparse(str(base_url or "").strip())
+            base_hostname = str(base.hostname or "").lower()
+            if base.scheme.lower() not in {"http", "https"} or not base_hostname:
+                continue
+
+            host = f"[{base_hostname}]" if ":" in base_hostname else base_hostname
+            netloc = f"{host}:{base.port}" if base.port is not None else host
+            return parsed._replace(
+                scheme=base.scheme.lower(),
+                netloc=netloc,
+            ).geturl()
+        except (TypeError, ValueError):
+            continue
+
+    return url
+
+
 def _load_generated_image_from_value(
     value: Any,
     *,
@@ -4459,6 +4521,7 @@ def _load_generated_image_from_value(
     if raw_value.startswith("data:"):
         loaded = load_b64_image_data(raw_value)
     elif raw_value.startswith(("http://", "https://")):
+        raw_value = _rewrite_loopback_generated_image_url(raw_value, allowed_base_urls)
         loaded = load_url_image_data(
             raw_value, headers=headers, allowed_base_urls=allowed_base_urls
         )
@@ -6030,11 +6093,35 @@ async def _generate_via_openai_image_edits_endpoint(
     upstream_model_id = _strip_connection_model_prefix(model_id, api_config)
     base_name = _model_id_basename(upstream_model_id).lower()
     stream_enabled = _openai_image_stream_enabled(stream)
+    try:
+        image_edit_compatibility = (
+            openai_router.resolve_openai_image_edit_compatibility(api_config)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    use_grok2api_json_edit = (
+        image_edit_compatibility == "grok2api"
+        and base_name in GROK2API_JSON_IMAGE_EDIT_MODELS
+    )
 
     resolved_images: list[tuple[str, bytes]] = []
+    resolved_data_urls: list[str] = []
     input_summaries: list[dict[str, Any]] = []
     for index, reference_image_url in enumerate(reference_image_urls):
-        resolved_image = _resolve_image_edit_input(request, user, reference_image_url)
+        if use_grok2api_json_edit:
+            resolved_data_url = _resolve_image_input_as_data_url(
+                request, user, reference_image_url
+            )
+            resolved_image = (
+                (resolved_data_url[0], resolved_data_url[1])
+                if resolved_data_url
+                else None
+            )
+        else:
+            resolved_data_url = None
+            resolved_image = _resolve_image_edit_input(
+                request, user, reference_image_url
+            )
         if not resolved_image:
             raise HTTPException(
                 status_code=400,
@@ -6044,6 +6131,8 @@ async def _generate_via_openai_image_edits_endpoint(
         image_mime, image_bytes = resolved_image
         mime_type = image_mime or "image/png"
         resolved_images.append((mime_type, image_bytes))
+        if resolved_data_url:
+            resolved_data_urls.append(resolved_data_url[2])
         input_summaries.append(
             {
                 "index": index + 1,
@@ -6071,7 +6160,7 @@ async def _generate_via_openai_image_edits_endpoint(
     }
     if size:
         payload["size"] = size
-    if background:
+    if background and not use_grok2api_json_edit:
         payload["background"] = background
     if _openai_image_model_has_default_response_format(base_name):
         if stream_enabled:
@@ -6080,22 +6169,43 @@ async def _generate_via_openai_image_edits_endpoint(
     else:
         payload["response_format"] = "b64_json"
 
-    image_files: list[dict[str, Any]] = []
-    for index, (image_mime, image_bytes) in enumerate(resolved_images):
-        image_extension = mimetypes.guess_extension(image_mime or "image/png") or ".png"
-        image_filename = (
-            f"image{image_extension}"
-            if len(resolved_images) == 1
-            else f"image-{index + 1}{image_extension}"
-        )
-        image_files.append(
-            {
-                "field_name": "image",
-                "filename": image_filename,
-                "mime": image_mime or "image/png",
-                "data": image_bytes,
-            }
-        )
+    if use_grok2api_json_edit:
+        request_payload = {
+            **payload,
+            "image": {"url": resolved_data_urls[0]},
+        }
+        if len(resolved_data_urls) > 1:
+            request_payload["images"] = [
+                {"url": data_url} for data_url in resolved_data_urls[1:]
+            ]
+        request_kwargs: dict[str, Any] = {
+            "request_kind": "json",
+            "json_body": request_payload,
+        }
+    else:
+        image_files: list[dict[str, Any]] = []
+        for index, (image_mime, image_bytes) in enumerate(resolved_images):
+            image_extension = (
+                mimetypes.guess_extension(image_mime or "image/png") or ".png"
+            )
+            image_filename = (
+                f"image{image_extension}"
+                if len(resolved_images) == 1
+                else f"image-{index + 1}{image_extension}"
+            )
+            image_files.append(
+                {
+                    "field_name": "image",
+                    "filename": image_filename,
+                    "mime": image_mime or "image/png",
+                    "data": image_bytes,
+                }
+            )
+        request_kwargs = {
+            "request_kind": "multipart",
+            "form_fields": payload,
+            "files": image_files,
+        }
 
     generation_url = _get_openai_images_edit_url(base_url, api_config)
     result, headers = await _send_openai_image_request_with_key_pool(
@@ -6105,9 +6215,7 @@ async def _generate_via_openai_image_edits_endpoint(
         route_label="edits",
         headers_factory=build_attempt_headers,
         url=generation_url,
-        request_kind="multipart",
-        form_fields=payload,
-        files=image_files,
+        **request_kwargs,
     )
 
     response_status = result.get("status")

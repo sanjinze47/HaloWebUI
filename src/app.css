@@ -612,6 +612,19 @@ textarea::placeholder {
 	object-fit: contain;
 }
 
+/* Generated-image cards own their dimensions and must never inherit the prose image cap. */
+.markdown-prose img.chat-generated-image {
+	max-width: 100% !important;
+	max-height: 100% !important;
+	width: 100% !important;
+	height: 100% !important;
+	object-fit: contain;
+}
+
+.markdown-prose img.chat-generated-image.chat-generated-image-natural {
+	height: auto !important;
+}
+
 @media (max-width: 768px) {
 	.markdown-prose img {
 		max-width: 320px !important;

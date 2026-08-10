@@ -1,6 +1,8 @@
 import pathlib
 import sys
 
+import pytest
+
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
@@ -15,6 +17,31 @@ from open_webui.routers.images import (  # noqa: E402
     _parse_natural_image_size,
     _validate_gpt_image_2_size,
 )
+from open_webui.routers.openai import (  # noqa: E402
+    resolve_openai_image_edit_compatibility,
+)
+
+
+def test_openai_image_edit_compatibility_defaults_and_legacy_name():
+    assert resolve_openai_image_edit_compatibility({}) == "standard"
+    assert (
+        resolve_openai_image_edit_compatibility({"remark": "Internal grok2api"})
+        == "grok2api"
+    )
+    assert (
+        resolve_openai_image_edit_compatibility(
+            {
+                "remark": "Internal grok2api",
+                "image_edit_compatibility": "standard",
+            }
+        )
+        == "standard"
+    )
+
+
+def test_openai_image_edit_compatibility_rejects_invalid_mode():
+    with pytest.raises(ValueError, match="Invalid image edit compatibility mode"):
+        resolve_openai_image_edit_compatibility({"image_edit_compatibility": "guess"})
 
 
 def test_openai_dedicated_image_model_keeps_generations_default_for_unannotated_relays():
@@ -275,7 +302,42 @@ def test_openai_compat_xai_named_model_stays_on_openai_image_route():
     assert classified["generation_mode"] == "openai_images"
     assert classified["supported_image_routes"] == ["generations"]
     assert classified["default_image_route"] == "generations"
+    assert classified["reference_image_default_route"] == ""
     assert classified["supports_resolution"] is False
+
+
+def test_openai_compat_grok_quality_model_offers_json_edit_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "grok-imagine-image-quality",
+            "name": "Grok Imagine Image Quality",
+            "endpoints": ["/v1/images/generations"],
+        },
+        base_url="https://relay.example/v1",
+        api_config={"image_edit_compatibility": "grok2api"},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["supported_image_routes"] == ["generations", "edits"]
+    assert classified["default_image_route"] == "generations"
+    assert classified["reference_image_default_route"] == "edits"
+
+
+def test_openai_compat_grok_lite_model_does_not_offer_edit_route():
+    classified = _classify_openai_image_model(
+        {
+            "id": "grok-imagine-image-lite",
+            "name": "Grok Imagine Image Lite",
+        },
+        base_url="https://relay.example/v1",
+        api_config={},
+        source={"effective_source": "personal", "provider": "openai"},
+    )
+
+    assert classified is not None
+    assert classified["supported_image_routes"] == ["generations"]
+    assert classified["default_image_route"] == "generations"
 
 
 def test_openai_video_endpoint_only_model_is_not_detected_as_image_model():

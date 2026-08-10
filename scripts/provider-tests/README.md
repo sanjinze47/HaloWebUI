@@ -32,7 +32,12 @@ This command reports whether an encrypted key exists but never decrypts or print
 powershell -NoProfile -File .\scripts\provider-tests\provider-smoke-test.ps1 -Provider sub2api -Scenario responses-stream
 ```
 
-Supported scenarios are `models`, `chat`, `chat-stream`, `responses`, and `responses-stream`. Test output is limited to status and protocol metadata; response bodies and authorization headers are not printed.
+Supported scenarios are `models`, `chat`, `chat-stream`, `responses`,
+`responses-stream`, `image-edit`, and `image-edit-stream`. Test output is limited to status and protocol
+metadata; response bodies and authorization headers are not printed. The image-edit
+scenario uses an embedded synthetic PNG and reports only response field names and the
+number of returned images. `-ReferenceImageUrl` may instead select a non-sensitive
+public HTTPS test image when diagnosing provider-side data-URL support.
 
 Chat and Responses scenarios require a model selected at invocation time:
 

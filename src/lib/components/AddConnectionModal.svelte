@@ -77,6 +77,7 @@
 			| 'max_tokens'
 			| 'max_completion_tokens'
 			| string;
+		image_edit_compatibility?: 'standard' | 'grok2api' | string;
 		// Anthropic-specific
 		anthropic_version?: string;
 		anthropic_beta?: string[];
@@ -217,6 +218,7 @@
 	let fileFailureStrategy: 'strict' | 'compat' = 'compat';
 	let geminiCompatibilityMode: 'strict' | 'auto' = 'strict';
 	let chatCompletionTokenParameter: 'auto' | 'max_tokens' | 'max_completion_tokens' = 'auto';
+	let imageEditCompatibility: 'standard' | 'grok2api' = 'standard';
 
 	// Anthropic settings
 	let anthropicVersion = '2023-06-01';
@@ -798,7 +800,10 @@
 				force_mode: isForceMode,
 				auth_type,
 				...(!ollama && !gemini && !grok && !anthropic
-					? { chat_completion_token_parameter: chatCompletionTokenParameter }
+					? {
+							chat_completion_token_parameter: chatCompletionTokenParameter,
+							image_edit_compatibility: imageEditCompatibility
+						}
 					: {}),
 				...(azure ? { azure: true } : {}),
 				...(apiVersion ? { api_version: apiVersion } : {}),
@@ -1451,7 +1456,10 @@
 					auth_type,
 					...(gemini ? { gemini_compatibility_mode: geminiCompatibilityMode } : {}),
 					...(!ollama && !gemini && !grok && !anthropic
-						? { chat_completion_token_parameter: chatCompletionTokenParameter }
+						? {
+								chat_completion_token_parameter: chatCompletionTokenParameter,
+								image_edit_compatibility: imageEditCompatibility
+							}
 						: {}),
 					headers: headers ? JSON.parse(headers) : undefined,
 					...(!grok && isForceMode ? { force_mode: true } : {}),
@@ -1557,6 +1565,7 @@
 			fileFailureStrategy = 'compat';
 			geminiCompatibilityMode = 'strict';
 			chatCompletionTokenParameter = 'auto';
+			imageEditCompatibility = 'standard';
 			nativeFileInputsTouched = false;
 			anthropicVersion = '2023-06-01';
 			anthropicVersionMode = '2023-06-01';
@@ -1626,6 +1635,13 @@
 					? connection.config?.chat_completion_token_parameter
 					: 'auto'
 			) as 'auto' | 'max_tokens' | 'max_completion_tokens';
+			imageEditCompatibility = (
+				['standard', 'grok2api'].includes(connection.config?.image_edit_compatibility ?? '')
+					? connection.config?.image_edit_compatibility
+					: /(^|[^a-z0-9])grok2api([^a-z0-9]|$)/i.test(connection.config?.remark ?? '')
+						? 'grok2api'
+						: 'standard'
+			) as 'standard' | 'grok2api';
 
 			if (ollama) {
 				connectionType = connection.config?.connection_type ?? 'local';
@@ -1706,6 +1722,7 @@
 			savedAzureProviderType = false;
 			geminiCompatibilityMode = 'strict';
 			chatCompletionTokenParameter = 'auto';
+			imageEditCompatibility = 'standard';
 			key = '';
 			keyPool = normalizeApiKeyPool(null, '');
 			if (gemini) {
@@ -2552,6 +2569,19 @@
 												{ value: 'auto', label: $i18n.t('Auto') },
 												{ value: 'max_tokens', label: 'max_tokens' },
 												{ value: 'max_completion_tokens', label: 'max_completion_tokens' }
+											]}
+											className="w-full"
+										/>
+									</div>
+									<div class="flex flex-col gap-1">
+										<label for="image-edit-compatibility" class="text-xs text-gray-500">
+											{$i18n.t('Image Edit Compatibility')}
+										</label>
+										<HaloSelect
+											bind:value={imageEditCompatibility}
+											options={[
+												{ value: 'standard', label: $i18n.t('Standard OpenAI') },
+												{ value: 'grok2api', label: 'grok2api' }
 											]}
 											className="w-full"
 										/>

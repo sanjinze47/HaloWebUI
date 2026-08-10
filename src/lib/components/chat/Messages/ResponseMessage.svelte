@@ -91,6 +91,10 @@
 		hasVisibleMessageFiles as messageHasVisibleFiles
 	} from '$lib/utils/chat-message-errors';
 	import type { HeadingItem } from '$lib/utils/headings';
+	import {
+		getImageGenerationResultLayout,
+		imageGenerationResultGridStyle
+	} from '$lib/utils/image-generation-result-layout';
 
 	type MessageOutlineVisibilityContext = {
 		scrollVisibleStore: Writable<boolean>;
@@ -348,20 +352,6 @@
 		const count = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 		return Math.max(1, Math.min(Math.floor(count), 4));
 	};
-	const imageGenerationGridColumns = (slotCount: number) => {
-		if (slotCount <= 1) {
-			return 1;
-		}
-		if (slotCount === 3) {
-			return 3;
-		}
-		return 2;
-	};
-	const imageGenerationGridStyle = (slotCount: number) => {
-		const columns = imageGenerationGridColumns(slotCount);
-		const maxWidth = slotCount === 1 ? 280 : slotCount === 3 ? 660 : 560;
-		return `grid-template-columns: repeat(${columns}, minmax(0, 1fr)); max-width: ${maxWidth}px;`;
-	};
 	const getImageGenerationStatusSlotCount = (
 		statuses: NonNullable<MessageType['statusHistory']>
 	) => {
@@ -431,6 +421,14 @@
 	$: imageGenerationResultSlots = buildImageGenerationResultSlots(
 		imageGenerationResultFiles,
 		imageGenerationResultSlotCount
+	);
+	$: canExpandSingleImageGenerationResult =
+		imageGenerationResultSlotCount === 1 &&
+		imageGenerationResultSlots[0]?.type === 'image' &&
+		Boolean(imageGenerationResultSlots[0]?.url);
+	$: imageGenerationResultLayout = getImageGenerationResultLayout(
+		imageGenerationResultSlotCount,
+		canExpandSingleImageGenerationResult
 	);
 	$: imageGenerationResultIdentityKeys = new Set(
 		imageGenerationResultFiles.flatMap(getMessageFileIdentityKeys)
@@ -1362,22 +1360,26 @@
 						{#if showImageGenerationResultGrid}
 							<div
 								class="my-2 grid w-full gap-2"
-								style={imageGenerationGridStyle(imageGenerationResultSlotCount)}
+								style={imageGenerationResultGridStyle(imageGenerationResultLayout)}
 								aria-label={tr('图片生成结果', 'Image generation results')}
 							>
 									{#each imageGenerationResultSlots as file, index}
 										<div
 											class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900"
 										>
-											<div class="relative aspect-[4/5] bg-gray-100 dark:bg-gray-950">
+										<div
+											class="relative bg-gray-100 dark:bg-gray-950 {imageGenerationResultLayout.useIntrinsicImageAspectRatio
+												? ''
+												: 'aspect-[4/5]'}"
+										>
 												{#if file?.type === 'image' && file.url}
 													<Image
 														src={file.url}
 														alt={`${tr('第 {{index}} 张', 'Image {{index}}', {
 															index: imageGenerationSlotNumber(file, index)
 														})}`}
-														className="h-full w-full outline-hidden focus:outline-hidden"
-														imageClassName="h-full w-full object-contain"
+												className="block h-full w-full outline-hidden focus:outline-hidden"
+												imageClassName={`chat-generated-image block h-full w-full object-contain ${imageGenerationResultLayout.useIntrinsicImageAspectRatio ? 'chat-generated-image-natural' : ''}`}
 													/>
 												{:else if file}
 													<div
@@ -1551,10 +1553,13 @@
 											<DiscussionPanel discussion={message.discussion} />
 										{/if}
 
-										{#if showImageGenerationPlaceholder}
-											<div
-												class="my-2 grid w-full select-none gap-2"
-												style={imageGenerationGridStyle(pendingImageGenerationSlotCount)}
+									{#if showImageGenerationPlaceholder}
+										{@const pendingImageGenerationLayout = getImageGenerationResultLayout(
+											pendingImageGenerationSlotCount
+										)}
+										<div
+											class="my-2 grid w-full select-none gap-2"
+											style={imageGenerationResultGridStyle(pendingImageGenerationLayout)}
 												aria-live="polite"
 											>
 												{#each pendingImageGenerationSlots as slotIndex}

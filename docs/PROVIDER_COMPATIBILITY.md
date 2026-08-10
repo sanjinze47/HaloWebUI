@@ -2,11 +2,11 @@
 
 ## Support tiers
 
-| Tier | Providers | Maintenance expectation |
+| Tier | Providers                                        | Maintenance expectation                                                  |
 | --- | --- | --- |
-| 1 | OpenAI, Sub2API, grok2api, CLIProxyAPI | Explicit compatibility, regression fixtures, affected-path smoke testing |
-| 2 | Existing named providers not in Tier 1 or Tier 3 | Preserve current behavior and test when touched |
-| 3 | Ollama and unknown OpenAI-compatible gateways | Best-effort compatibility without unrelated release blocking |
+| 1    | OpenAI, Sub2API, grok2api, CLIProxyAPI           | Explicit compatibility, regression fixtures, affected-path smoke testing |
+| 2    | Existing named providers not in Tier 1 or Tier 3 | Preserve current behavior and test when touched                          |
+| 3    | Ollama and unknown OpenAI-compatible gateways    | Best-effort compatibility without unrelated release blocking             |
 
 A tier does not imply that a provider supports every capability.
 
@@ -56,6 +56,10 @@ upstream commit, and verification date. Distinguish:
   `max_tokens`, or `max_completion_tokens`. Explicit values override endpoint and
   model heuristics. Missing legacy values use `auto`; Responses requests continue to
   use `max_output_tokens`.
+- `OPENAI_API_CONFIGS[index].image_edit_compatibility` accepts `standard` or
+  `grok2api`. The latter enables grok2api's JSON data-URL image edit protocol;
+  standard OpenAI-compatible image edits remain multipart. Legacy connections whose
+  configured name contains `grok2api` retain the grok2api behavior.
 - `OPENAI_API_CONFIGS[index].responses_compatibility` accepts `standard`,
   `sub2api`, or `custom`. Invalid persisted or submitted values are configuration
   errors and never silently become `standard`.
