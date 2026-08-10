@@ -10,9 +10,11 @@
 	import { copyToClipboard } from '$lib/utils';
 	import {
 		getCitationDomain,
+		getCitationDisplayName,
 		getCitationEntries,
 		getCitationFaviconUrl,
 		getCitationSourceUrl,
+		hasUsefulCitationExcerpt,
 		normalizeCitationUrl
 	} from '$lib/utils/citations';
 	import { translateWithDefault } from '$lib/i18n';
@@ -60,13 +62,15 @@
 
 	function getCitationTitle(item: Record<string, any> | null, limit = 90): string {
 		return getDisplayTitle(
-			decodeString(
-				item?.source?.name ?? item?.source?.title ?? item?.id ?? tr('引用来源', 'Citation source')
-			),
+			decodeString(getCitationDisplayName(item, tr('引用来源', 'Citation source'))),
 			limit,
 			44,
 			22
 		);
+	}
+
+	function hasVisibleExcerpt(document: (typeof mergedDocuments)[number]): boolean {
+		return hasUsefulCitationExcerpt(document.document, getCitationTitle(citation));
 	}
 
 	function getDocumentUrl(document: any): string {
@@ -137,18 +141,32 @@
 	placement={$mobile ? 'bottom' : 'right'}
 	bind:show
 	className={$mobile
-		? 'h-[78dvh] max-h-[680px] w-full overflow-hidden rounded-t-lg bg-white dark:bg-gray-900'
-		: 'h-full w-full max-w-[560px] overflow-hidden bg-white dark:bg-gray-900'}
-	overlayClassName="bg-black/35 dark:bg-black/60"
+		? 'h-[86dvh] max-h-[720px] w-full overflow-hidden rounded-t-xl bg-white dark:bg-gray-900'
+		: 'h-full w-full max-w-[680px] overflow-hidden bg-white dark:bg-gray-900'}
+	overlayClassName="bg-black/25 dark:bg-black/40"
 >
-	<div class="flex h-full min-h-0 flex-col">
+	<div
+		class="flex h-full min-h-0 flex-col"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="citation-drawer-title"
+	>
+		{#if $mobile}
+			<div
+				class="mx-auto mt-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-700"
+				aria-hidden="true"
+			></div>
+		{/if}
 		<header
-			class="flex h-14 shrink-0 items-center justify-between border-b border-black/5 px-4 dark:border-white/5"
+			class="flex h-16 shrink-0 items-center justify-between border-b border-black/5 px-4 dark:border-white/5 md:px-5"
 		>
 			<div class="flex min-w-0 items-center gap-2.5">
 				<BookOpen class="size-4 shrink-0 text-gray-500 dark:text-gray-400" strokeWidth={1.9} />
 				<div class="min-w-0">
-					<div class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+					<div
+						id="citation-drawer-title"
+						class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+					>
 						{tr('引用来源', 'Citation sources')}
 					</div>
 					<div class="text-[10px] text-gray-400 dark:text-gray-500">
@@ -168,10 +186,10 @@
 		</header>
 
 		<div
-			class="grid min-h-0 flex-1 grid-rows-[128px_minmax(0,1fr)] md:grid-cols-[190px_minmax(0,1fr)] md:grid-rows-1"
+			class="grid min-h-0 flex-1 grid-rows-[112px_minmax(0,1fr)] md:grid-cols-[224px_minmax(0,1fr)] md:grid-rows-1"
 		>
 			<nav
-				class="flex min-w-0 gap-1 overflow-x-auto border-b border-black/5 p-2 scrollbar-thin dark:border-white/5 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r"
+				class="flex min-w-0 gap-1 overflow-x-auto border-b border-black/5 bg-gray-50/70 p-2 scrollbar-thin dark:border-white/5 dark:bg-gray-950/30 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r"
 				aria-label={tr('来源列表', 'Source list')}
 			>
 				{#each citations as item, idx}
@@ -214,7 +232,9 @@
 				{/each}
 			</nav>
 
-			<section class="min-h-0 min-w-0 overflow-y-auto px-4 py-5 scrollbar-thin md:px-5">
+			<section
+				class="min-h-0 min-w-0 overflow-y-auto bg-white px-4 py-5 scrollbar-thin dark:bg-gray-900 md:px-6"
+			>
 				{#if citation}
 					{@const sourceIndex = Math.max(
 						0,
@@ -248,7 +268,7 @@
 						>
 					</div>
 
-					<h2 class="mt-3 text-base font-semibold leading-6 text-gray-900 dark:text-gray-100">
+					<h2 class="mt-3 text-lg font-semibold leading-7 text-gray-900 dark:text-gray-100">
 						{#if sourceUrl}
 							<a
 								href={sourceUrl}
@@ -301,14 +321,24 @@
 					</div>
 
 					{#if sourceUrl}
-						<div
-							class="mt-4 break-all font-mono text-[10px] leading-4 text-gray-400 dark:text-gray-500"
+						<details
+							class="mt-4 rounded-md border border-black/5 bg-black/[0.02] px-3 py-2 dark:border-white/5 dark:bg-white/[0.02]"
 						>
-							{sourceUrl}
-						</div>
+							<summary
+								class="cursor-pointer text-[11px] font-medium text-gray-500 dark:text-gray-400"
+							>
+								{tr('查看链接', 'View link')}
+							</summary>
+							<div
+								class="mt-2 break-all font-mono text-[10px] leading-4 text-gray-400 dark:text-gray-500"
+							>
+								{sourceUrl}
+							</div>
+						</details>
 					{/if}
 
-					{#if mergedDocuments.length > 0}
+					{@const excerptDocuments = mergedDocuments.filter(hasVisibleExcerpt)}
+					{#if excerptDocuments.length > 0}
 						<div class="mt-6 border-t border-black/5 pt-4 dark:border-white/5">
 							<div
 								class="mb-3 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500"
@@ -316,8 +346,10 @@
 								{tr('引用片段', 'Cited excerpt')}
 							</div>
 
-							{#each mergedDocuments as document, documentIdx}
-								<div class="mb-5 last:mb-0">
+							{#each excerptDocuments as document, documentIdx}
+								<div
+									class="mb-4 last:mb-0 rounded-lg border border-black/10 bg-black/[0.02] p-3 dark:border-white/10 dark:bg-white/[0.025]"
+								>
 									<div
 										class="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500"
 									>
@@ -357,7 +389,7 @@
 									</div>
 
 									<div
-										class="border-l-2 border-emerald-500/70 pl-3 text-sm leading-6 text-gray-600 dark:text-gray-300"
+										class="max-h-[280px] overflow-y-auto border-l-2 border-emerald-500/70 pl-3 text-sm leading-6 text-gray-600 dark:text-gray-300"
 									>
 										{#if document.metadata?.html}
 											<iframe

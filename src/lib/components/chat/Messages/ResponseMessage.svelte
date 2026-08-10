@@ -707,7 +707,8 @@
 	};
 
 	const toggleInlineCitations = async () => {
-		const nextValue = !($settings?.showInlineCitations ?? true);
+		const previousValue = $settings?.showInlineCitations ?? true;
+		const nextValue = !previousValue;
 		const optimisticSettings = {
 			...($settings ?? {}),
 			showInlineCitations: nextValue
@@ -722,8 +723,13 @@
 		try {
 			await saveUserSettingsPatch(localStorage.token, { showInlineCitations: nextValue });
 		} catch (error) {
-			settings.set(optimisticSettings);
-			toast.error(tr('正文引用显示偏好保存失败', 'Failed to save inline citation preference.'));
+			if (($settings?.showInlineCitations ?? true) === nextValue) {
+				settings.update((current) => ({
+					...(current ?? {}),
+					showInlineCitations: previousValue
+				}));
+			}
+			toast.error(tr('引用来源显示偏好保存失败', 'Failed to save citation source preference.'));
 		}
 	};
 

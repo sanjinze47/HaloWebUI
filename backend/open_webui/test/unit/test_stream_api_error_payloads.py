@@ -68,6 +68,21 @@ async def _failing_stream():
     yield b""
 
 
+async def _native_search_error_stream():
+    yield (
+        b'data: {"error":{"message":"The upstream returned a response that '
+        b'was not completed.","type":"responses_api_error",'
+        b'"code":"response_not_completed"}}\n'
+    )
+    yield b"data: [DONE]\n"
+
+
+async def _fallback_success_stream():
+    yield b'data: {"choices":[{"delta":{"content":"fallback answer"}}]}\n'
+    yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n'
+    yield b"data: [DONE]\n"
+
+
 def test_stream_background_task_exception_finalizes_message(monkeypatch):
     events = []
     upserts = []
@@ -146,3 +161,124 @@ def test_stream_background_task_exception_finalizes_message(monkeypatch):
     final_upsert = upserts[-1][2]
     assert final_upsert["done"] is True
     assert final_upsert["error"]["type"] == "generation_interrupted"
+
+
+def test_native_web_search_stream_error_retries_with_halo_search(monkeypatch):
+    events = []
+    upserts = []
+    created = {}
+    search_calls = []
+    generated_payloads = []
+
+    async def fake_event_emitter(event):
+        events.append(event)
+
+    async def fake_process_filter_functions(**kwargs):
+        return kwargs["form_data"], {}
+
+    async def fake_chat_web_search_handler(
+        _request, form_data, _extra_params, _user, queries=None
+    ):
+        search_calls.append(queries)
+        return form_data
+
+    async def fake_generate_chat_completion(_request, payload, _user):
+        generated_payloads.append(payload)
+        return StreamingResponse(
+            _fallback_success_stream(), media_type="text/event-stream"
+        )
+
+    def fake_create_task(coroutine, id=None, *, blocks_completion=True):
+        created["coroutine"] = coroutine
+        created["chat_id"] = id
+        created["blocks_completion"] = blocks_completion
+        return "task-1", SimpleNamespace()
+
+    monkeypatch.setattr(middleware, "get_event_emitter", lambda _metadata: fake_event_emitter)
+    monkeypatch.setattr(middleware, "get_event_call", lambda _metadata: object())
+    monkeypatch.setattr(middleware, "get_sorted_filters", lambda _model: [])
+    monkeypatch.setattr(
+        middleware, "process_filter_functions", fake_process_filter_functions
+    )
+    monkeypatch.setattr(middleware, "create_task", fake_create_task)
+    monkeypatch.setattr(middleware, "set_current_task_blocks_completion", lambda _value: True)
+    monkeypatch.setattr(middleware, "chat_web_search_handler", fake_chat_web_search_handler)
+    monkeypatch.setattr(
+        middleware, "generate_chat_completion", fake_generate_chat_completion
+    )
+    monkeypatch.setattr(middleware, "get_active_status_by_user_id", lambda _user_id: True)
+    monkeypatch.setattr(
+        middleware.Chats,
+        "get_message_by_id_and_message_id",
+        lambda _chat_id, _message_id: {"content": "", "files": []},
+    )
+    monkeypatch.setattr(middleware.Chats, "get_messages_by_chat_id", lambda _chat_id: {})
+    monkeypatch.setattr(middleware.Chats, "get_chat_title_by_id", lambda _chat_id: "New Chat")
+    monkeypatch.setattr(
+        middleware.Chats,
+        "upsert_message_to_chat_by_id_and_message_id",
+        lambda chat_id, message_id, payload, **_kwargs: upserts.append(
+            (chat_id, message_id, payload)
+        ),
+    )
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                WEBUI_NAME="Halo WebUI",
+                config=SimpleNamespace(
+                    ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION=False,
+                    WEBUI_URL="http://localhost",
+                ),
+            )
+        )
+    )
+    user = SimpleNamespace(id="user-1", email="u@example.com", name="User", role="user")
+    metadata = {
+        "session_id": "session-1",
+        "chat_id": "chat-1",
+        "message_id": "assistant-1",
+        "allow_native_web_search_halo_fallback": True,
+        "auto_web_search_decision": {"queries": ["latest updates"]},
+    }
+    form_data = {
+        "model": "gpt-test",
+        "stream": True,
+        "native_web_search": True,
+        "native_web_search_required": True,
+        "messages": [{"role": "user", "content": "What is new?"}],
+    }
+    response = StreamingResponse(
+        _native_search_error_stream(), media_type="text/event-stream"
+    )
+
+    result = asyncio.run(
+        middleware.process_chat_response(
+            request, response, form_data, user, metadata, {}, [], {}
+        )
+    )
+
+    assert result == {"status": True, "task_id": "task-1"}
+    asyncio.run(created["coroutine"])
+
+    assert search_calls == [["latest updates"]]
+    assert len(generated_payloads) == 1
+    assert "native_web_search" not in generated_payloads[0]
+    assert "native_web_search_required" not in generated_payloads[0]
+
+    error_events = [
+        event
+        for event in events
+        if event.get("type") == "chat:completion"
+        and event.get("data", {}).get("error")
+    ]
+    assert error_events == []
+
+    completion_events = [
+        event
+        for event in events
+        if event.get("type") == "chat:completion" and event.get("data", {}).get("done")
+    ]
+    assert "error" not in completion_events[-1]["data"]
+    assert "fallback answer" in completion_events[-1]["data"]["content"]
+    assert upserts[-1][2]["done"] is True

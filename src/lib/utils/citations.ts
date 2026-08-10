@@ -11,6 +11,7 @@ const normalizeCitationList = (value: unknown): any[] => {
 };
 
 const HTTP_URL_PATTERN = /^https?:\/\//i;
+const PLACEHOLDER_TITLE_PATTERN = /^\[?\d{1,4}(?:\.\d+)?\]?\.?$/;
 
 export const normalizeCitationUrl = (value: unknown): string => {
 	const text = String(value ?? '').trim();
@@ -52,6 +53,46 @@ export const getCitationFaviconUrl = (citation: any): string => {
 	return domain
 		? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
 		: '';
+};
+
+const firstTextValue = (...values: unknown[]): string => {
+	for (const value of values) {
+		if (typeof value === 'string' && value.trim()) return value.trim();
+	}
+	return '';
+};
+
+export const isPlaceholderCitationTitle = (value: unknown): boolean =>
+	PLACEHOLDER_TITLE_PATTERN.test(String(value ?? '').trim());
+
+/** Prefer a useful source label when upstream providers return numeric placeholders. */
+export const getCitationDisplayName = (citation: any, fallback = 'Citation source'): string => {
+	const metadata = Array.isArray(citation?.metadata) ? citation.metadata[0] : citation?.metadata;
+	const rawTitle = firstTextValue(
+		citation?.source?.name,
+		citation?.source?.title,
+		metadata?.name,
+		metadata?.title,
+		citation?.id
+	);
+
+	if (rawTitle && !isPlaceholderCitationTitle(rawTitle)) {
+		const titleUrl = normalizeCitationUrl(rawTitle);
+		return titleUrl ? getCitationDomain(titleUrl) || rawTitle : rawTitle;
+	}
+	return getCitationDomain(citation) || normalizeCitationUrl(rawTitle) || fallback;
+};
+
+export const hasUsefulCitationExcerpt = (document: unknown, title = ''): boolean => {
+	const text = String(document ?? '').trim();
+	if (!text || isPlaceholderCitationTitle(text)) return false;
+
+	const normalizedText = text.replace(/\s+/g, ' ').toLowerCase();
+	const normalizedTitle = String(title ?? '')
+		.trim()
+		.replace(/\s+/g, ' ')
+		.toLowerCase();
+	return !normalizedTitle || normalizedText !== normalizedTitle;
 };
 
 export const getCitationDocuments = (citation: any): any[] => {

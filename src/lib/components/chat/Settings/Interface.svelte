@@ -298,7 +298,7 @@
 		autoTags = $settings.autoTags ?? true;
 
 		detectArtifacts = $settings.detectArtifacts ?? true;
-		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? ($settings.detectArtifacts ?? true);
+		svgPreviewAutoOpen = $settings.svgPreviewAutoOpen ?? $settings.detectArtifacts ?? true;
 		responseAutoCopy = $settings.responseAutoCopy ?? false;
 
 		showUsername = $settings.showUsername ?? false;
@@ -847,7 +847,7 @@
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs">{tr('显示正文引用标签', 'Show Inline Citations')}</div>
+					<div class=" self-center text-xs">{tr('显示引用来源', 'Show citation sources')}</div>
 
 					<button
 						class="p-1 px-3 text-xs flex rounded-sm transition"

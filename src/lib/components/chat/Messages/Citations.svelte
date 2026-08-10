@@ -7,6 +7,7 @@
 	import Document from '$lib/components/icons/Document.svelte';
 	import {
 		getCitationDomain,
+		getCitationDisplayName,
 		getCitationEntries,
 		getCitationFaviconUrl,
 		getCitationSourceUrl
@@ -65,7 +66,7 @@
 
 	function getCitationTitle(citation: Citation, limit = 64): string {
 		return getDisplayTitle(
-			decodeString(citation.source?.name ?? citation.source?.title ?? citation.id ?? ''),
+			decodeString(getCitationDisplayName(citation, tr('引用来源', 'Citation source'))),
 			limit,
 			36,
 			18
@@ -163,6 +164,10 @@
 		openCitation(citation);
 		return true;
 	}
+
+	$: if (!inlineCitationsVisible) {
+		showCitationDrawer = false;
+	}
 </script>
 
 <CitationsModal
@@ -175,104 +180,146 @@
 
 {#if citations.length > 0}
 	{@const hasWebCitations = citations.some(isWebCitation)}
-	<div class="-mx-0.5 mt-1.5 w-full">
-		<div class="flex min-h-[30px] items-center justify-between gap-3 text-xs">
-			<div class="flex min-w-0 items-center gap-2">
-				{#if onToggleInlineCitations}
-					<Tooltip
-						content={inlineCitationsVisible
-							? tr('隐藏正文引用标签', 'Hide inline citations')
-							: tr('显示正文引用标签', 'Show inline citations')}
-						placement="bottom"
+	<div class="-mx-0.5 mt-2 w-full">
+		{#if inlineCitationsVisible}
+			<div
+				class="rounded-lg border border-black/10 bg-black/[0.025] p-1.5 dark:border-white/10 dark:bg-white/[0.025]"
+			>
+				<div class="flex min-h-[28px] items-center justify-between gap-3 px-1">
+					<div class="flex min-w-0 items-center gap-2">
+						{#if onToggleInlineCitations}
+							<Tooltip
+								content={tr(
+									'隐藏引用来源（含正文标签）',
+									'Hide citation sources (including inline markers)'
+								)}
+								placement="bottom"
+							>
+								<button
+									type="button"
+									class="flex size-7 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/5 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-200"
+									aria-label={tr(
+										'隐藏引用来源（含正文标签）',
+										'Hide citation sources (including inline markers)'
+									)}
+									aria-pressed={inlineCitationsVisible}
+									on:click={onToggleInlineCitations}
+								>
+									<EyeOff className="size-3.5" strokeWidth={2.1} />
+								</button>
+							</Tooltip>
+						{/if}
+						<div
+							class="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+						>
+							{#if hasWebCitations}
+								<GlobeAlt
+									className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+									strokeWidth="1.9"
+								/>
+							{:else}
+								<Document
+									className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+									strokeWidth="1.9"
+								/>
+							{/if}
+							<span>{tr('引用来源', 'Citation sources')}</span>
+							<span
+								class="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-white/10 dark:text-gray-400"
+								>{citations.length}</span
+							>
+						</div>
+					</div>
+					<button
+						type="button"
+						class="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-500/10 dark:text-emerald-300"
+						aria-label={tr('查看全部来源', 'View all citation sources')}
+						on:click={openAllCitations}
 					>
+						{tr('查看全部', 'View all')}
+					</button>
+				</div>
+
+				<div class="mt-1.5 flex gap-1.5 overflow-x-auto scrollbar-none">
+					{#each citations.slice(0, 4) as citation, idx}
+						{@const sourceUrl = getCitationSourceUrl(citation)}
+						{@const domain = getCitationDomain(citation)}
+						{@const faviconUrl = getCitationFaviconUrl(citation)}
 						<button
 							type="button"
-							class="flex size-6 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/5 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-200"
-							aria-label={inlineCitationsVisible
-								? tr('隐藏正文引用标签', 'Hide inline citations')
-								: tr('显示正文引用标签', 'Show inline citations')}
-							on:click={onToggleInlineCitations}
+							id={`source-${id}-${idx + 1}`}
+							class="group flex min-w-[174px] max-w-[240px] flex-1 shrink-0 items-center gap-2 rounded-md border border-black/10 bg-white/70 px-2.5 py-2 text-left transition hover:border-emerald-500/40 hover:bg-white dark:border-white/10 dark:bg-gray-900/50 dark:hover:border-emerald-400/40 dark:hover:bg-gray-900"
+							title={sourceUrl || getCitationTitle(citation, 80)}
+							on:click={() => openCitation(citation)}
 						>
-							{#if inlineCitationsVisible}
-								<EyeOff className="size-3.5" strokeWidth={2.1} />
-							{:else}
-								<Eye className="size-3.5" strokeWidth={2.1} />
-							{/if}
+							<span
+								class="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800"
+							>
+								{#if faviconUrl && !faviconFailures[citation.id]}
+									<img
+										src={faviconUrl}
+										alt=""
+										class="size-4 rounded-sm"
+										on:error={() => hideFavicon(citation.id)}
+									/>
+								{:else if isWebCitation(citation)}
+									<GlobeAlt
+										className="size-3.5 text-gray-400 dark:text-gray-500"
+										strokeWidth="1.8"
+									/>
+								{:else}
+									<Document
+										className="size-3.5 text-gray-400 dark:text-gray-500"
+										strokeWidth="1.8"
+									/>
+								{/if}
+							</span>
+							<span class="min-w-0 flex-1">
+								<span
+									class="block truncate text-[11px] font-medium text-gray-800 group-hover:text-gray-950 dark:text-gray-100 dark:group-hover:text-white"
+								>
+									{idx + 1}. {getCitationTitle(citation)}
+								</span>
+								<span class="mt-0.5 block truncate text-[10px] text-gray-400 dark:text-gray-500">
+									{domain || tr('本地文档', 'Local document')}
+								</span>
+							</span>
 						</button>
-					</Tooltip>
-				{/if}
-				<div class="flex min-w-0 items-center gap-1.5 font-medium text-gray-500 dark:text-gray-400">
-					{#if hasWebCitations}
-						<GlobeAlt className="size-3.5 shrink-0" strokeWidth="1.9" />
-					{:else}
-						<Document className="size-3.5 shrink-0" strokeWidth="1.9" />
+					{/each}
+					{#if citations.length > 4}
+						<button
+							type="button"
+							class="flex min-w-[92px] shrink-0 items-center justify-center rounded-md border border-dashed border-emerald-500/30 px-2 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-500/10 dark:text-emerald-300"
+							on:click={openAllCitations}
+						>
+							{tr('还有 {{count}} 个', '+{{count}} more', { count: citations.length - 4 })}
+						</button>
 					{/if}
-					<span>{tr('来源', 'Sources')}</span>
-					<span class="text-gray-400 dark:text-gray-500">{citations.length}</span>
 				</div>
 			</div>
-			<button
-				type="button"
-				class="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-black/5 dark:text-blue-400 dark:hover:bg-white/5"
-				on:click={openAllCitations}
+		{:else}
+			<div
+				class="flex min-h-[34px] items-center gap-2 rounded-lg border border-dashed border-black/10 bg-black/[0.015] px-2 dark:border-white/10 dark:bg-white/[0.015]"
 			>
-				{tr('查看全部', 'View all')}
-			</button>
-		</div>
-
-		<div
-			class="flex w-full overflow-x-auto border-y border-black/5 scrollbar-none dark:border-white/5"
-		>
-			{#each citations.slice(0, 8) as citation, idx}
-				{@const sourceUrl = getCitationSourceUrl(citation)}
-				{@const domain = getCitationDomain(citation)}
-				{@const faviconUrl = getCitationFaviconUrl(citation)}
-				<button
-					type="button"
-					id={`source-${id}-${idx + 1}`}
-					class="group flex min-w-[168px] max-w-[230px] flex-1 shrink-0 items-center gap-2 border-r border-black/5 px-2.5 py-2 text-left transition hover:bg-black/[0.035] dark:border-white/5 dark:hover:bg-white/[0.035] first:pl-0"
-					title={sourceUrl || getCitationTitle(citation, 80)}
-					on:click={() => openCitation(citation)}
-				>
-					<span
-						class="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-gray-100 dark:bg-gray-800"
-					>
-						{#if faviconUrl && !faviconFailures[citation.id]}
-							<img
-								src={faviconUrl}
-								alt=""
-								class="size-4 rounded-sm"
-								on:error={() => hideFavicon(citation.id)}
-							/>
-						{:else if isWebCitation(citation)}
-							<GlobeAlt className="size-3.5 text-gray-400 dark:text-gray-500" strokeWidth="1.8" />
-						{:else}
-							<Document className="size-3.5 text-gray-400 dark:text-gray-500" strokeWidth="1.8" />
-						{/if}
-					</span>
-					<span class="min-w-0 flex-1">
-						<span
-							class="block truncate text-[11px] font-medium text-gray-700 group-hover:text-gray-950 dark:text-gray-200 dark:group-hover:text-white"
+				{#if onToggleInlineCitations}
+					<Tooltip content={tr('显示引用来源', 'Show citation sources')} placement="bottom">
+						<button
+							type="button"
+							class="flex size-7 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/5 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-200"
+							aria-label={tr('显示引用来源', 'Show citation sources')}
+							aria-pressed={inlineCitationsVisible}
+							on:click={onToggleInlineCitations}
 						>
-							{idx + 1}. {getCitationTitle(citation)}
-						</span>
-						{#if domain}
-							<span class="mt-0.5 block truncate text-[10px] text-gray-400 dark:text-gray-500">
-								{domain}
-							</span>
-						{/if}
-					</span>
-				</button>
-			{/each}
-			{#if citations.length > 8}
-				<button
-					type="button"
-					class="flex min-w-[72px] shrink-0 items-center justify-center px-2 text-[11px] font-medium text-blue-600 transition hover:bg-black/[0.035] dark:text-blue-400 dark:hover:bg-white/[0.035]"
-					on:click={openAllCitations}
+							<Eye className="size-3.5" strokeWidth={2.1} />
+						</button>
+					</Tooltip>
+				{:else}
+					<Eye className="size-3.5 text-gray-400 dark:text-gray-500" strokeWidth={2.1} />
+				{/if}
+				<span class="text-[11px] text-gray-500 dark:text-gray-400"
+					>{tr('引用来源已隐藏', 'Citation sources hidden')}</span
 				>
-					+{citations.length - 8}
-				</button>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	</div>
 {/if}

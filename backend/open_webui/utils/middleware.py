@@ -6833,7 +6833,23 @@ async def process_chat_response(
                 _stream_api_error = None
                 _stream_response_status = None
                 _stream_non_sse_error_lines: list[str] = []
+                stream_error_emitted = False
                 stream_started_at = time.time()
+
+                async def emit_stream_api_error(error):
+                    nonlocal stream_error_emitted
+                    if stream_error_emitted:
+                        return
+
+                    stream_error_emitted = True
+                    await event_emitter(
+                        {
+                            "type": "chat:completion",
+                            "data": {
+                                "error": error,
+                            },
+                        }
+                    )
 
                 async def stream_body_handler(response):
                     nonlocal content
@@ -7038,14 +7054,19 @@ async def process_chat_response(
                                     error = data.get("error", {})
                                     if error:
                                         _stream_api_error = error
-                                        await event_emitter(
-                                            {
-                                                "type": "chat:completion",
-                                                "data": {
-                                                    "error": error,
-                                                },
-                                            }
-                                        )
+                                        # A native web-search failure is retried below
+                                        # with HaloWebUI search when no answer content
+                                        # has been produced yet. Do not expose the first
+                                        # transport error before that retry is attempted.
+                                        if not (
+                                            should_retry_native_web_search_with_halo(
+                                                metadata, error
+                                            )
+                                            and not _has_visible_assistant_output(
+                                                content_blocks, message_files
+                                            )
+                                        ):
+                                            await emit_stream_api_error(error)
                                     if _raw_usage:
                                         await event_emitter(
                                             {
@@ -7558,6 +7579,77 @@ async def process_chat_response(
                         await response.background()
 
                 await stream_body_handler(response)
+
+                # Responses API failures arrive inside an HTTP 200 stream, so the
+                # outer chat request cannot catch them. Retry the one-shot native
+                # web-search path here before finalizing the background task.
+                if (
+                    _stream_api_error
+                    and should_retry_native_web_search_with_halo(
+                        metadata, _stream_api_error
+                    )
+                    and not _has_visible_assistant_output(
+                        content_blocks, message_files
+                    )
+                ):
+                    native_error = _stream_api_error
+                    metadata["allow_native_web_search_halo_fallback"] = False
+                    retry_form_data = deepcopy(form_data)
+                    retry_form_data.pop("native_web_search", None)
+                    retry_form_data.pop("native_web_search_required", None)
+                    retry_form_data["stream"] = True
+
+                    retry_queries = None
+                    auto_decision = metadata.get("auto_web_search_decision")
+                    if isinstance(auto_decision, dict):
+                        retry_queries = auto_decision.get("queries")
+
+                    await event_emitter(
+                        {
+                            "type": "notification",
+                            "data": {
+                                "type": "info",
+                                "content": (
+                                    "Native web search failed; switched to "
+                                    "HaloWebUI search for this request."
+                                ),
+                            },
+                        }
+                    )
+
+                    try:
+                        retry_form_data = await chat_web_search_handler(
+                            request,
+                            retry_form_data,
+                            extra_params,
+                            user,
+                            queries=retry_queries,
+                        )
+                        retry_response = await generate_chat_completion(
+                            request, retry_form_data, user
+                        )
+                        if not isinstance(retry_response, StreamingResponse):
+                            raise RuntimeError(
+                                "HaloWebUI web-search fallback returned a "
+                                "non-streaming response."
+                            )
+
+                        _stream_api_error = None
+                        await stream_body_handler(retry_response)
+                    except Exception as fallback_error:
+                        _stream_api_error = _normalize_api_error(
+                            "HaloWebUI web-search fallback failed: "
+                            f"{fallback_error}"
+                        )
+                        log.warning(
+                            "[NATIVE WEB SEARCH FALLBACK] failed; preserving "
+                            "the original error=%s fallback_error=%s",
+                            native_error,
+                            fallback_error,
+                        )
+
+                    if _stream_api_error and not stream_error_emitted:
+                        await emit_stream_api_error(_stream_api_error)
 
                 native_cfg = get_user_native_tools_config(request, user)
                 max_rounds_cfg = normalize_max_tool_call_rounds(

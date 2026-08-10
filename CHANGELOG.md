@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Made the citation visibility preference hide inline markers, source cards, and the detail drawer together while retaining a compact restore control.
+- Refined citation source cards and the responsive detail drawer with clearer hierarchy, lighter overlay treatment, compact link disclosure, and excerpt cards.
+
+### Fixed
+
+- Reverted citation visibility locally when saving the preference fails and filtered numeric placeholder titles and title-only excerpts from source details.
+- Retried failed native web-search streams with HaloWebUI search when the upstream returned no completed response.
+
 ## [0.2.5] - 2026-08-10
 
 ### Changed

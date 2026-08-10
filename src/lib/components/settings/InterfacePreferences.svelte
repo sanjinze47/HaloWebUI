@@ -2275,7 +2275,7 @@
 										</div>
 										<div class="flex items-center justify-between glass-item px-4 py-3">
 											<div class="text-sm font-medium">
-												{tr('显示正文引用标签', 'Show Inline Citations')}
+													{tr('显示引用来源', 'Show citation sources')}
 											</div>
 											<Switch
 												bind:state={showInlineCitations}

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	getCitationDomain,
+	getCitationDisplayName,
 	getCitationEntries,
 	getCitationFaviconUrl,
 	getCitationSourceUrl,
+	hasUsefulCitationExcerpt,
+	isPlaceholderCitationTitle,
 	normalizeCitationUrl
 } from './citations';
 
@@ -66,5 +69,20 @@ describe('citation source normalization', () => {
 		expect(getCitationSourceUrl({ id: 'file-123', source: { name: 'Local file' } })).toBe('');
 		expect(getCitationDomain('not a URL')).toBe('');
 		expect(getCitationFaviconUrl({ id: 'file-123' })).toBe('');
+	});
+
+	it('replaces numeric upstream titles with the source domain', () => {
+		const citation = {
+			id: 'https://bbc.com/article',
+			source: { name: '1', url: 'https://bbc.com/article' }
+		};
+
+		expect(isPlaceholderCitationTitle('1')).toBe(true);
+		expect(getCitationDisplayName(citation)).toBe('bbc.com');
+	});
+
+	it('does not render a title-only citation as an excerpt', () => {
+		expect(hasUsefulCitationExcerpt('1', 'bbc.com')).toBe(false);
+		expect(hasUsefulCitationExcerpt('A real excerpt from the source.', 'bbc.com')).toBe(true);
 	});
 });
