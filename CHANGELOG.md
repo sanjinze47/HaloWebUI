@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-10
+
 ### Changed
 
 - Established project-wide product, architecture, provider, data, quality, and release contracts for ongoing fork maintenance.
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Socket authentication refresh, per-response chat task recovery, cross-chat failure isolation, queued multi-model completion, and retryable attachment deletion.
 - Fixed knowledge editing and indexing order, staged Skill repair, cross-platform migration locking, persistent secret-key resolution, and retryable knowledge, file, upload, and user cleanup.
 - Normalized OpenAI Responses terminal errors and stream/non-stream output, added explicit Gemini and token-parameter compatibility modes, and made Ollama response cleanup deterministic.
+- Fixed Gemini route startup, local document fallback without request state, orphan upload cleanup, Windows ZIP MIME normalization, Grok mojibake repair, and buffered reasoning duration accounting.
 
 ## [0.2.2] - 2026-08-07
 
