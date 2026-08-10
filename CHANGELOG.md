@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-11
+
 ### Changed
 
 - Made the citation visibility preference hide inline markers, source cards, and the detail drawer together while retaining a compact restore control.
