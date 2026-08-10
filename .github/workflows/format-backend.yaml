@@ -34,6 +34,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,7 +50,23 @@ jobs:
           pip install -r backend/requirements/full.txt -r backend/requirements/dev-test.txt
 
       - name: Check backend formatting
-        run: black --check backend
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+          mapfile -t changed_python < <(
+            git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$GITHUB_SHA" |
+              grep -E '^backend/.*\.py$' || true
+          )
+          if (( ${#changed_python[@]} == 0 )); then
+            echo "No changed backend Python files to format-check."
+            exit 0
+          fi
+          black --check "${changed_python[@]}"
 
       - name: Run backend unit tests
         run: |

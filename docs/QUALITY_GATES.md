@@ -16,18 +16,18 @@ weaken, delete, or skip tests to make a change pass.
 
 ## Change matrix
 
-| Change class | Minimum verification |
-| --- | --- |
-| Frontend behavior | focused Vitest, `npm run check`, full frontend tests, build |
-| Backend behavior | focused pytest, affected backend suite, compileall |
-| Frontend/backend contract | both suites, request/response fixture, error path |
-| Provider adapter | sanitized contract fixtures, stream/non-stream paths, provider tier policy |
-| Authentication/authorization | allowed and denied cases at the backend boundary |
-| Files/knowledge | validation, access, cleanup, failure, persisted metadata |
-| Skills | install/manage authorization, invoke authorization, failure and cleanup |
-| Schema/migration | old SQLite copy upgrade, repeated startup, data preservation |
-| Docker/runtime | Compose validation, image build, container health and version smoke |
-| Release/workflow | YAML validation, version/tag/source SHA checks, immutable tag behavior |
+| Change class                 | Minimum verification                                                       |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| Frontend behavior            | focused Vitest, `npm run check`, full frontend tests, build                |
+| Backend behavior             | focused pytest, affected backend suite, compileall                         |
+| Frontend/backend contract    | both suites, request/response fixture, error path                          |
+| Provider adapter             | sanitized contract fixtures, stream/non-stream paths, provider tier policy |
+| Authentication/authorization | allowed and denied cases at the backend boundary                           |
+| Files/knowledge              | validation, access, cleanup, failure, persisted metadata                   |
+| Skills                       | install/manage authorization, invoke authorization, failure and cleanup    |
+| Schema/migration             | old SQLite copy upgrade, repeated startup, data preservation               |
+| Docker/runtime               | Compose validation, image build, container health and version smoke        |
+| Release/workflow             | YAML validation, version/tag/source SHA checks, immutable tag behavior     |
 
 ## Core local checks
 
@@ -40,12 +40,21 @@ npm run test:frontend
 npm run build
 ```
 
+`npm run check` enforces the accepted legacy ceiling of 5432 errors, 124 warnings,
+and 240 affected files. Use `npm run check:raw` to print every diagnostic. A change
+must not raise any ceiling; reduce the baseline whenever existing diagnostics are
+fixed.
+
 Backend on Bash:
 
 ```bash
 PYTHONPATH=backend python -m pytest -q backend/open_webui/test/unit
 python -m compileall -q backend/open_webui
 ```
+
+CI applies Black to Python files added or modified by the change. The repository-wide
+`black --check backend` result remains tracked as legacy formatting debt; new or
+modified Python code is not allowed to add to it.
 
 The unit-suite `conftest.py` assigns a disposable `DATA_DIR` unless the caller already
 provided one. Tests must never create, migrate, or reuse the developer's application
