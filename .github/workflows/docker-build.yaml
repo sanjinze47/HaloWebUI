@@ -509,7 +509,7 @@ jobs:
             base_tag="edge"
           fi
           echo "SMOKE_IMAGE=ghcr.io/${image_name}:${base_tag}${TAG_SUFFIX}" >> "$GITHUB_ENV"
-          echo "EXPECTED_VERSION=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_ENV"
+          echo "EXPECTED_VERSION=$(node -p 'require("./package.json").version')" >> "$GITHUB_ENV"
           echo "EXPECTED_BUILD_HASH=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "EXPECTED_PROFILE=$EXPECTED_PROFILE" >> "$GITHUB_ENV"
 
