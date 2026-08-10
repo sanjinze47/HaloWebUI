@@ -65,6 +65,10 @@ from open_webui.utils.api_key_pool import (
     normalize_indexed_api_key_pools,
     should_retry_api_key,
 )
+from open_webui.utils.gemini_compatibility import (
+    classify_unsupported_gemini_capability,
+    resolve_gemini_compatibility_mode,
+)
 
 
 log = logging.getLogger(__name__)
@@ -558,31 +562,6 @@ def _parse_gemini_json_objects(
     return objects
 
 
-def _iter_gemini_compat_payloads(
-    gemini_payload: dict, *, allow_drop_response_modalities: bool = True
-) -> list[dict]:
-    payloads: list[dict] = []
-    variants = [
-        {"drop_tools": True},
-        {"drop_tools": True, "drop_thinking": True},
-    ]
-    if allow_drop_response_modalities:
-        variants.append(
-            {
-                "drop_tools": True,
-                "drop_thinking": True,
-                "drop_response_modalities": True,
-            }
-        )
-
-    for variant in variants:
-        compat_payload = _build_compat_payload(gemini_payload, **variant)
-        if compat_payload != gemini_payload and compat_payload not in payloads:
-            payloads.append(compat_payload)
-
-    return payloads
-
-
 def _gemini_usage_to_openai_usage(usage_meta: Optional[dict]) -> Optional[dict]:
     if not isinstance(usage_meta, dict) or not usage_meta:
         return None
@@ -979,61 +958,72 @@ async def _open_gemini_response(
     gemini_payload: dict,
     *,
     log_prefix: str,
-    allow_drop_response_modalities: bool = True,
+    compatibility_mode: str = "auto",
+    required_capabilities: Optional[set[str]] = None,
 ) -> tuple[Optional[aiohttp.ClientResponse], Optional[dict], Optional[int], str]:
     last_err_text = ""
     last_status: Optional[int] = None
+    required = set(required_capabilities or set())
+    mode = resolve_gemini_compatibility_mode(
+        {"gemini_compatibility_mode": compatibility_mode}
+    )
 
     for attempt_idx, (attempt_url, attempt_headers) in enumerate(attempts):
-        response = await session.post(attempt_url, json=gemini_payload, headers=attempt_headers)
-        last_status = response.status
-        log.info(f"{log_prefix} Status: {response.status}")
+        current_payload = copy.deepcopy(gemini_payload)
+        stripped: set[str] = set()
+        while True:
+            response = await session.post(
+                attempt_url, json=current_payload, headers=attempt_headers
+            )
+            last_status = response.status
+            log.info(f"{log_prefix} Status: {response.status}")
 
-        if response.status == 200:
-            return response, gemini_payload, last_status, last_err_text
+            if response.status == 200:
+                return response, current_payload, last_status, last_err_text
 
-        try:
-            last_err_text = await response.text()
-        except Exception as e:
-            last_err_text = f"Failed to read error body: {e}"
+            try:
+                last_err_text = await response.text()
+            except Exception as e:
+                last_err_text = f"Failed to read error body: {e}"
 
-        log.error(
-            f"[GEMINI API ERROR] Status: {response.status}, Full response: {last_err_text[:2000]}"
-        )
-        await response.release()
+            log.error(
+                f"[GEMINI API ERROR] Status: {response.status}, Full response: {last_err_text[:2000]}"
+            )
+            response.release()
 
-        if response.status in (401, 403):
-            if attempt_idx + 1 < len(attempts):
-                continue
-            break
+            if response.status in (401, 403):
+                break
 
-        if response.status == 400:
-            for compat_payload in _iter_gemini_compat_payloads(
-                gemini_payload,
-                allow_drop_response_modalities=allow_drop_response_modalities,
+            capability = classify_unsupported_gemini_capability(
+                response.status, last_err_text
+            )
+            if (
+                mode != "auto"
+                or capability is None
+                or capability in required
+                or capability in stripped
+                or len(stripped) >= 3
             ):
-                log.info("[GEMINI COMPAT] Retrying with stripped payload")
-                retry_response = await session.post(
-                    attempt_url, json=compat_payload, headers=attempt_headers
-                )
-                last_status = retry_response.status
-                log.info(f"{log_prefix} Retry Status: {retry_response.status}")
+                return None, None, last_status, last_err_text
 
-                if retry_response.status == 200:
-                    return retry_response, compat_payload, last_status, last_err_text
+            drop_args = {
+                "drop_tools": capability == "tools",
+                "drop_thinking": capability == "thinking",
+                "drop_response_modalities": capability == "response_modalities",
+            }
+            compat_payload = _build_compat_payload(current_payload, **drop_args)
+            if compat_payload == current_payload:
+                return None, None, last_status, last_err_text
 
-                try:
-                    last_err_text = await retry_response.text()
-                except Exception as e:
-                    last_err_text = f"Failed to read error body: {e}"
+            stripped.add(capability)
+            current_payload = compat_payload
+            log.info(
+                "[GEMINI COMPAT] Retrying after upstream rejected optional %s",
+                capability,
+            )
 
-                log.error(
-                    f"[GEMINI API ERROR] Status: {retry_response.status}, Full response: {last_err_text[:2000]}"
-                )
-                await retry_response.release()
+        if attempt_idx + 1 >= len(attempts):
             break
-
-        break
 
     return None, None, last_status, last_err_text
 
@@ -1065,11 +1055,25 @@ class GeminiConfigForm(BaseModel):
     GEMINI_API_CONFIGS: dict
 
 
+def _validate_gemini_api_configs(configs: Any) -> None:
+    if not isinstance(configs, dict):
+        raise ValueError("GEMINI_API_CONFIGS must be an object.")
+    for config in configs.values():
+        if not isinstance(config, dict):
+            raise ValueError("Each Gemini API config must be an object.")
+        resolve_gemini_compatibility_mode(config)
+
+
 @router.post("/config/update")
 async def update_config(
     request: Request, form_data: GeminiConfigForm, user=Depends(get_admin_user)
 ):
     """Update Gemini API configuration."""
+    try:
+        _validate_gemini_api_configs(form_data.GEMINI_API_CONFIGS)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Preserve existing per-URL prefix_id to avoid breaking chats when admins edit connections.
     # prefix_id is an internal stable identifier used for uniqueness/routing and should not be user-editable.
     prev_urls = list(getattr(request.app.state.config, "GEMINI_API_BASE_URLS", []) or [])
@@ -1538,6 +1542,10 @@ async def verify_connection(
         form_data.key,
         form_data.config or {},
     )
+    try:
+        resolve_gemini_compatibility_mode(config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         response = await send_get_request(f"{url}/models", key, config)
@@ -1592,6 +1600,10 @@ async def health_check_connection(
         form_data.key or "",
         form_data.config or {},
     )
+    try:
+        resolve_gemini_compatibility_mode(config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     chosen_model = form_data.model
     if not chosen_model:
@@ -1805,6 +1817,10 @@ async def generate_chat_completion(
         api_config,
         url_idx=idx,
     )
+    try:
+        gemini_compatibility_mode = resolve_gemini_compatibility_mode(api_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if api_config.get("_resolved_model_id"):
         form_data["model"] = api_config["_resolved_model_id"]
@@ -2321,6 +2337,14 @@ async def generate_chat_completion(
     )
     request_url = stream_url if stream else non_stream_url
 
+    required_compat_capabilities: set[str] = set()
+    if _wants_web_search(form_data) or bool(form_data.get("tools")):
+        required_compat_capabilities.add("tools")
+    if form_data.get("reasoning_effort") is not None:
+        required_compat_capabilities.add("thinking")
+    if is_image_model:
+        required_compat_capabilities.add("response_modalities")
+
     key_attempts = get_api_key_attempts(
         provider="gemini",
         connection_key=_get_gemini_connection_key(api_config, idx),
@@ -2352,7 +2376,8 @@ async def generate_chat_completion(
                             _auth_attempts(request_url, key_attempt.key, api_config),
                             gemini_payload,
                             log_prefix="Gemini Stream Response",
-                            allow_drop_response_modalities=not is_image_model,
+                            compatibility_mode=gemini_compatibility_mode,
+                            required_capabilities=required_compat_capabilities,
                         )
                         if response is not None:
                             break
@@ -2389,7 +2414,8 @@ async def generate_chat_completion(
                                 _auth_attempts(non_stream_url, key_attempt.key, api_config),
                                 gemini_payload,
                                 log_prefix="Gemini Chat Fallback Response",
-                                allow_drop_response_modalities=False,
+                                compatibility_mode=gemini_compatibility_mode,
+                                required_capabilities=required_compat_capabilities,
                             )
                             if fallback_response is not None:
                                 break
@@ -2411,7 +2437,7 @@ async def generate_chat_completion(
                             try:
                                 gemini_response = await fallback_response.json(content_type=None)
                             finally:
-                                await fallback_response.release()
+                                fallback_response.release()
 
                             yield f"data: {json.dumps(_openai_chunk(stream_id, model_id, {'role': 'assistant'}), ensure_ascii=False)}\n\n"
                             stream_chunks, global_tool_call_index, _finished = (
@@ -2527,7 +2553,7 @@ async def generate_chat_completion(
                                         yield "data: [DONE]\n\n"
                                         return
                     finally:
-                        await response.release()
+                        response.release()
 
                     warning_limiter.flush()
                     yield "data: [DONE]\n\n"
@@ -2560,7 +2586,8 @@ async def generate_chat_completion(
                     _auth_attempts(request_url, key_attempt.key, api_config),
                     gemini_payload,
                     log_prefix="Gemini Chat Response",
-                    allow_drop_response_modalities=not is_image_model,
+                    compatibility_mode=gemini_compatibility_mode,
+                    required_capabilities=required_compat_capabilities,
                 )
                 if response is not None:
                     break
@@ -2591,7 +2618,7 @@ async def generate_chat_completion(
             try:
                 gemini_response = await response.json(content_type=None)
             finally:
-                await response.release()
+                response.release()
             openai_response = convert_gemini_to_openai(gemini_response, model_id)
             return JSONResponse(content=openai_response)
 

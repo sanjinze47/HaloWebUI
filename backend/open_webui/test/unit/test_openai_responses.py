@@ -10,12 +10,19 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from open_webui.utils.openai_responses import (
+    RESPONSES_TRANSPORT_DONE_EVENT,
+    ResponsesCompatibilityError,
+    ResponsesProtocolError,
+    collect_responses_response,
     convert_chat_completions_to_responses_payload,
     convert_responses_to_chat_completions,
     normalize_url_citations,
     iter_responses_events,
+    resolve_responses_compatibility,
     responses_events_to_chat_completions_sse,
 )
+
+import pytest
 
 
 async def _aiter(chunks):
@@ -197,6 +204,32 @@ def test_convert_chat_completions_to_responses_payload_injects_native_web_search
     assert r["tool_choice"] == "auto"
 
 
+def test_responses_compatibility_defaults_to_current_web_search_tool():
+    compatibility = resolve_responses_compatibility({})
+
+    assert compatibility["mode"] == "standard"
+    assert compatibility["native_web_search_tool_type"] == "web_search"
+
+
+def test_responses_compatibility_preserves_explicit_preview_tool():
+    compatibility = resolve_responses_compatibility(
+        {"native_web_search_tool_type": "web_search_preview"}
+    )
+
+    assert compatibility["native_web_search_tool_type"] == "web_search_preview"
+
+
+def test_responses_compatibility_rejects_invalid_mode():
+    with pytest.raises(ResponsesCompatibilityError):
+        resolve_responses_compatibility({"responses_compatibility": "typo"})
+
+    with pytest.raises(ResponsesCompatibilityError):
+        convert_chat_completions_to_responses_payload(
+            {"model": "gpt-test", "messages": []},
+            responses_compatibility="typo",
+        )
+
+
 def test_convert_chat_completions_to_responses_payload_forces_native_web_search_tool():
     chat = {
         "model": "gpt-test",
@@ -313,6 +346,7 @@ def test_iter_responses_events_sse_fragmented():
     events = asyncio.run(run())
     assert events[0]["type"] == "response.output_text.delta"
     assert events[1]["type"] == "response.completed"
+    assert events[2]["type"] == RESPONSES_TRANSPORT_DONE_EVENT
 
 
 def test_iter_responses_events_ndjson():
@@ -341,6 +375,253 @@ def test_responses_events_to_chat_sse_text_and_done():
     lines = asyncio.run(run())
     assert any('"content": "Hello"' in line for line in lines)
     assert lines[-1].strip() == "data: [DONE]"
+
+
+def test_responses_stream_raw_eof_is_an_error_not_a_success_finish():
+    async def run():
+        events = _aiter([{"type": "response.output_text.delta", "delta": "partial"}])
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(events, model_id="gpt-test")
+        )
+
+    lines = asyncio.run(run())
+    assert any("upstream_stream_incomplete" in line for line in lines)
+    assert not any('"finish_reason": "stop"' in line for line in lines)
+    assert lines[-1].strip() == "data: [DONE]"
+
+
+def test_responses_transport_done_is_a_success_finish():
+    events = [
+        {"type": "response.output_text.delta", "delta": "complete"},
+        {"type": RESPONSES_TRANSPORT_DONE_EVENT},
+    ]
+
+    async def run():
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        )
+
+    lines = asyncio.run(run())
+    assert any('"finish_reason": "stop"' in line for line in lines)
+    assert not any("upstream_stream_incomplete" in line for line in lines)
+
+
+def test_responses_error_events_are_normalized_without_success_finish():
+    events = [
+        {
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {"message": "quota exhausted", "code": "quota"},
+            },
+        }
+    ]
+
+    async def run():
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        )
+
+    lines = asyncio.run(run())
+    assert any("quota exhausted" in line and '"code": "quota"' in line for line in lines)
+    assert not any('"finish_reason": "stop"' in line for line in lines)
+
+
+def test_mixed_text_and_tool_stream_finishes_with_tool_calls():
+    events = [
+        {"type": "response.output_text.delta", "delta": "I will call a tool."},
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": "{}",
+            },
+        },
+        {"type": "response.completed", "response": {"status": "completed"}},
+    ]
+
+    async def run():
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(_aiter(events), model_id="gpt-test")
+        )
+
+    lines = asyncio.run(run())
+    assert any('"finish_reason": "tool_calls"' in line for line in lines)
+
+
+def test_collect_responses_stream_requires_terminal_event():
+    async def run():
+        return await collect_responses_response(
+            _aiter([{"type": "response.output_text.done", "text": "partial"}])
+        )
+
+    with pytest.raises(ResponsesProtocolError) as exc:
+        asyncio.run(run())
+    assert exc.value.error["code"] == "upstream_stream_incomplete"
+
+
+def test_collect_responses_stream_builds_response_on_transport_done():
+    async def run():
+        return await collect_responses_response(
+            _aiter(
+                [
+                    {"type": "response.output_text.delta", "delta": "hello"},
+                    {"type": RESPONSES_TRANSPORT_DONE_EVENT},
+                ]
+            )
+        )
+
+    response = asyncio.run(run())
+    converted = convert_responses_to_chat_completions(response, model_id="gpt-test")
+    assert converted["choices"][0]["message"]["content"] == "hello"
+
+
+def test_collect_responses_merges_accumulated_events_into_minimal_terminal_response():
+    async def run():
+        return await collect_responses_response(
+            _aiter(
+                [
+                    {"type": "response.output_text.delta", "delta": "hello"},
+                    {
+                        "type": "response.output_text.annotation.added",
+                        "annotation": {
+                            "type": "url_citation",
+                            "url": "https://example.com/source",
+                            "title": "Example source",
+                        },
+                    },
+                    {
+                        "type": "response.reasoning_text.delta",
+                        "item_id": "reasoning-1",
+                        "delta": "checked context",
+                    },
+                    {
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": "call-1",
+                        "delta": '{"q":"halo"}',
+                    },
+                    {
+                        "type": "response.function_call_arguments.done",
+                        "item_id": "call-1",
+                        "name": "lookup",
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "status": "completed",
+                            "usage": {"output_tokens": 2},
+                        },
+                    },
+                ]
+            )
+        )
+
+    converted = convert_responses_to_chat_completions(
+        asyncio.run(run()), model_id="gpt-test"
+    )
+    choice = converted["choices"][0]
+    assert choice["message"]["content"] == "hello"
+    assert choice["message"]["reasoning_content"] == "checked context"
+    assert choice["message"]["tool_calls"][0]["function"] == {
+        "name": "lookup",
+        "arguments": '{"q":"halo"}',
+    }
+    assert choice["finish_reason"] == "tool_calls"
+    assert converted["sources"][0]["source"]["url"] == "https://example.com/source"
+
+
+def test_collect_responses_does_not_duplicate_reasoning_done_after_deltas():
+    async def run():
+        return await collect_responses_response(
+            _aiter(
+                [
+                    {
+                        "type": "response.reasoning_summary_text.delta",
+                        "item_id": "reasoning-1",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "delta": "checked context",
+                    },
+                    {
+                        "type": "response.reasoning_summary_text.done",
+                        "item_id": "reasoning-1",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "text": "checked context",
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {"status": "completed"},
+                    },
+                ]
+            )
+        )
+
+    converted = convert_responses_to_chat_completions(
+        asyncio.run(run()), model_id="gpt-test"
+    )
+    assert converted["choices"][0]["message"]["reasoning_content"] == (
+        "checked context"
+    )
+
+
+def test_completed_response_output_is_emitted_when_stream_has_no_delta_events():
+    events = [
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp-final",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "final text"}],
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call-final",
+                        "name": "lookup",
+                        "arguments": "{}",
+                    },
+                ],
+            },
+        }
+    ]
+
+    async def run():
+        return await _collect_async(
+            responses_events_to_chat_completions_sse(
+                _aiter(events), model_id="gpt-test"
+            )
+        )
+
+    lines = asyncio.run(run())
+    assert any('"content": "final text"' in line for line in lines)
+    assert any(
+        '"name": "lookup"' in line and '"id": "call-final"' in line
+        for line in lines
+    )
+    assert any('"finish_reason": "tool_calls"' in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        ("failed", "upstream_error"),
+        ("incomplete", "response_incomplete"),
+        ("cancelled", "response_cancelled"),
+        ("in_progress", "response_not_completed"),
+    ],
+)
+def test_direct_responses_failure_statuses_are_rejected(status, code):
+    payload = {"status": status, "error": {"message": "failed"}}
+    if status != "failed":
+        payload.pop("error")
+    with pytest.raises(ResponsesProtocolError) as exc:
+        convert_responses_to_chat_completions(payload, model_id="gpt-test")
+    assert exc.value.error["code"] == code
 
 
 def test_responses_events_to_chat_sse_emits_annotation_added_event_once():

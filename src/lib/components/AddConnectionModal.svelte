@@ -71,6 +71,12 @@
 		native_web_search_tool_type?: string;
 		native_file_inputs_enabled?: boolean;
 		file_failure_strategy?: 'strict' | 'compat' | string;
+		gemini_compatibility_mode?: 'strict' | 'auto' | string;
+		chat_completion_token_parameter?:
+			| 'auto'
+			| 'max_tokens'
+			| 'max_completion_tokens'
+			| string;
 		// Anthropic-specific
 		anthropic_version?: string;
 		anthropic_beta?: string[];
@@ -205,10 +211,12 @@
 	let responsesCompatibility: 'standard' | 'sub2api' | 'custom' = 'standard';
 	let responsesDefaultInstructions = '';
 	let responsesOmitMaxOutputTokens = false;
-	let nativeWebSearchToolType = 'web_search_preview';
+	let nativeWebSearchToolType = 'web_search';
 	let nativeFileInputsEnabled = false;
 	let nativeFileInputsTouched = false;
 	let fileFailureStrategy: 'strict' | 'compat' = 'compat';
+	let geminiCompatibilityMode: 'strict' | 'auto' = 'strict';
+	let chatCompletionTokenParameter: 'auto' | 'max_tokens' | 'max_completion_tokens' = 'auto';
 
 	// Anthropic settings
 	let anthropicVersion = '2023-06-01';
@@ -789,6 +797,9 @@
 						: {}),
 				force_mode: isForceMode,
 				auth_type,
+				...(!ollama && !gemini && !grok && !anthropic
+					? { chat_completion_token_parameter: chatCompletionTokenParameter }
+					: {}),
 				...(azure ? { azure: true } : {}),
 				...(apiVersion ? { api_version: apiVersion } : {}),
 				...(parsedHeaders ? { headers: parsedHeaders } : {}),
@@ -801,7 +812,7 @@
 							responses_compatibility: responsesCompatibility,
 							responses_default_instructions: responsesDefaultInstructions.trim(),
 							responses_omit_max_output_tokens: responsesOmitMaxOutputTokens,
-							native_web_search_tool_type: nativeWebSearchToolType.trim() || 'web_search_preview'
+							native_web_search_tool_type: nativeWebSearchToolType.trim() || 'web_search'
 						}
 					: {}),
 				...(!ollama &&
@@ -868,6 +879,7 @@
 			config: withApiKeyPoolConfig(
 				{
 					auth_type,
+					gemini_compatibility_mode: geminiCompatibilityMode,
 					...(prefixId.trim() ? { prefix_id: prefixId.trim() } : {}),
 					...(parsedGeminiHeaders ? { headers: parsedGeminiHeaders } : {})
 				},
@@ -1225,6 +1237,7 @@
 			config: withApiKeyPoolConfig(
 				{
 					auth_type,
+					gemini_compatibility_mode: geminiCompatibilityMode,
 					...(prefixId.trim() ? { prefix_id: prefixId.trim() } : {}),
 					...(_headers ? { headers: _headers } : {})
 				},
@@ -1436,6 +1449,10 @@
 					model_ids: modelIds,
 					connection_type: connectionType,
 					auth_type,
+					...(gemini ? { gemini_compatibility_mode: geminiCompatibilityMode } : {}),
+					...(!ollama && !gemini && !grok && !anthropic
+						? { chat_completion_token_parameter: chatCompletionTokenParameter }
+						: {}),
 					headers: headers ? JSON.parse(headers) : undefined,
 					...(!grok && isForceMode ? { force_mode: true } : {}),
 					...(anthropic
@@ -1476,7 +1493,7 @@
 								responses_compatibility: responsesCompatibility,
 								responses_default_instructions: responsesDefaultInstructions.trim(),
 								responses_omit_max_output_tokens: responsesOmitMaxOutputTokens,
-								native_web_search_tool_type: nativeWebSearchToolType.trim() || 'web_search_preview'
+								native_web_search_tool_type: nativeWebSearchToolType.trim() || 'web_search'
 							}
 						: {})
 				})
@@ -1535,9 +1552,11 @@
 			responsesCompatibility = 'standard';
 			responsesDefaultInstructions = '';
 			responsesOmitMaxOutputTokens = false;
-			nativeWebSearchToolType = 'web_search_preview';
+			nativeWebSearchToolType = 'web_search';
 			nativeFileInputsEnabled = false;
 			fileFailureStrategy = 'compat';
+			geminiCompatibilityMode = 'strict';
+			chatCompletionTokenParameter = 'auto';
 			nativeFileInputsTouched = false;
 			anthropicVersion = '2023-06-01';
 			anthropicVersionMode = '2023-06-01';
@@ -1595,6 +1614,18 @@
 			remark = connection.config?.remark ?? '';
 			icon = connection.config?.icon ?? '';
 			modelIds = connection.config?.model_ids ?? [];
+			geminiCompatibilityMode = (
+				['strict', 'auto'].includes(connection.config?.gemini_compatibility_mode ?? '')
+					? connection.config?.gemini_compatibility_mode
+					: 'auto'
+			) as 'strict' | 'auto';
+			chatCompletionTokenParameter = (
+				['auto', 'max_tokens', 'max_completion_tokens'].includes(
+					connection.config?.chat_completion_token_parameter ?? ''
+				)
+					? connection.config?.chat_completion_token_parameter
+					: 'auto'
+			) as 'auto' | 'max_tokens' | 'max_completion_tokens';
 
 			if (ollama) {
 				connectionType = connection.config?.connection_type ?? 'local';
@@ -1646,7 +1677,7 @@
 					responsesOmitMaxOutputTokens =
 						connection.config?.responses_omit_max_output_tokens ?? false;
 					nativeWebSearchToolType =
-						connection.config?.native_web_search_tool_type ?? 'web_search_preview';
+						connection.config?.native_web_search_tool_type ?? 'web_search';
 					fileFailureStrategy = (
 						['strict', 'compat'].includes(connection.config?.file_failure_strategy ?? '')
 							? connection.config?.file_failure_strategy
@@ -1673,6 +1704,8 @@
 			}
 		} else {
 			savedAzureProviderType = false;
+			geminiCompatibilityMode = 'strict';
+			chatCompletionTokenParameter = 'auto';
 			key = '';
 			keyPool = normalizeApiKeyPool(null, '');
 			if (gemini) {
@@ -2158,6 +2191,19 @@
 											)}
 										</div>
 									</div>
+									<div class="flex flex-col">
+										<label for="gemini-compatibility-mode" class="text-xs text-gray-500 mb-1">
+											{$i18n.t('Gemini Compatibility')}
+										</label>
+										<HaloSelect
+											bind:value={geminiCompatibilityMode}
+											options={[
+												{ value: 'strict', label: $i18n.t('Strict') },
+												{ value: 'auto', label: $i18n.t('Auto Compatibility') }
+											]}
+											className="w-full"
+										/>
+									</div>
 								{:else if !ollama && !direct && anthropic}
 									<!-- Anthropic Settings -->
 									<div class="flex flex-col gap-3">
@@ -2495,6 +2541,23 @@
 									</div>
 								{/if}
 
+								{#if !ollama && !gemini && !grok && !anthropic && !isForceMode}
+									<div class="flex flex-col gap-1">
+										<label for="chat-token-parameter" class="text-xs text-gray-500">
+											{$i18n.t('Chat Completion Token Parameter')}
+										</label>
+										<HaloSelect
+											bind:value={chatCompletionTokenParameter}
+											options={[
+												{ value: 'auto', label: $i18n.t('Auto') },
+												{ value: 'max_tokens', label: 'max_tokens' },
+												{ value: 'max_completion_tokens', label: 'max_completion_tokens' }
+											]}
+											className="w-full"
+										/>
+									</div>
+								{/if}
+
 								{#if !ollama && !direct && !gemini && !grok && !anthropic && !azure && !isForceMode}
 									<!-- Use Responses API -->
 									<div class="flex flex-col gap-2">
@@ -2562,7 +2625,7 @@
 															id="native-web-search-tool-type"
 															class="w-full px-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg focus:outline-none"
 															bind:value={nativeWebSearchToolType}
-															placeholder="web_search_preview"
+															placeholder="web_search"
 														/>
 													</div>
 												{/if}

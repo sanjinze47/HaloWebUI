@@ -202,5 +202,18 @@ class AuthsTable:
         except Exception:
             return False
 
+    def delete_auth_and_user_record_by_id(self, id: str) -> bool:
+        """Delete both identity rows in one transaction after resource cleanup."""
+        try:
+            from open_webui.models.users import User
+
+            with get_db() as db:
+                db.query(Auth).filter_by(id=id).delete()
+                db.query(User).filter_by(id=id).delete()
+                db.commit()
+            return True
+        except Exception:
+            return False
+
 
 Auths = AuthsTable()

@@ -21,27 +21,8 @@ IF /I "%WEB_LOADER_ENGINE%" == "playwright" (
     python -c "import importlib.util; spec = importlib.util.find_spec('nltk'); print('nltk optional dependency missing; skipping punkt_tab download.') if spec is None else __import__('nltk').download('punkt_tab')"
 )
 
-SET "KEY_FILE=.webui_secret_key"
 IF "%PORT%"=="" SET PORT=8080
 IF "%HOST%"=="" SET HOST=0.0.0.0
-SET "WEBUI_SECRET_KEY=%WEBUI_SECRET_KEY%"
-SET "WEBUI_JWT_SECRET_KEY=%WEBUI_JWT_SECRET_KEY%"
-
-:: Check if WEBUI_SECRET_KEY and WEBUI_JWT_SECRET_KEY are not set
-IF "%WEBUI_SECRET_KEY%%WEBUI_JWT_SECRET_KEY%" == " " (
-    echo Loading WEBUI_SECRET_KEY from file, not provided as an environment variable.
-
-    IF NOT EXIST "%KEY_FILE%" (
-        echo Generating WEBUI_SECRET_KEY
-        :: Generate a random value to use as a WEBUI_SECRET_KEY in case the user didn't provide one
-        SET /p WEBUI_SECRET_KEY=<nul
-        FOR /L %%i IN (1,1,12) DO SET /p WEBUI_SECRET_KEY=<!random!>>%KEY_FILE%
-        echo WEBUI_SECRET_KEY generated
-    )
-
-    echo Loading WEBUI_SECRET_KEY from %KEY_FILE%
-    SET /p WEBUI_SECRET_KEY=<%KEY_FILE%
-)
 
 :: Execute uvicorn
 SET "WEBUI_SECRET_KEY=%WEBUI_SECRET_KEY%"

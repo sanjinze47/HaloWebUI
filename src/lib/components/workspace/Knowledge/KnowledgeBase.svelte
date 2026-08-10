@@ -24,6 +24,7 @@
 
 	import { transcribeAudio } from '$lib/apis/audio';
 	import { blobToFile } from '$lib/utils';
+	import { saveThenReindexFile } from '$lib/utils/async-file-actions';
 	import {
 		getFileUploadDiagnostic,
 		getLocalizedFileUploadDiagnostic,
@@ -92,6 +93,7 @@
 
 	let selectedFile = null;
 	let selectedFileId = null;
+	let savingFileContent = false;
 
 	$: if (selectedFileId) {
 		const file = (knowledge?.files ?? []).find((file) => file.id === selectedFileId);
@@ -475,24 +477,36 @@
 	};
 
 	const updateFileContentHandler = async () => {
+		if (savingFileContent || !selectedFile?.id) {
+			return;
+		}
+
 		const fileId = selectedFile.id;
-		const content = selectedFile.data.content;
+		const content = selectedFile.data?.content ?? '';
+		savingFileContent = true;
 
-		const res = updateFileDataContentById(localStorage.token, fileId, content).catch((e) => {
-			toast.error(`${e}`);
-		});
+		try {
+			const { reindexResult: updatedKnowledge } = await saveThenReindexFile({
+				save: async () => {
+					const savedFile = await updateFileDataContentById(localStorage.token, fileId, content);
+					if (!savedFile) {
+						throw new Error($i18n.t('Failed to update file content.'));
+					}
+					return savedFile;
+				},
+				reindex: () => updateFileFromKnowledgeById(localStorage.token, id, fileId)
+			});
 
-		const updatedKnowledge = await updateFileFromKnowledgeById(
-			localStorage.token,
-			id,
-			fileId
-		).catch((e) => {
-			toast.error(`${e}`);
-		});
+			if (!updatedKnowledge) {
+				throw new Error($i18n.t('Failed to update file content.'));
+			}
 
-		if (res && updatedKnowledge) {
 			knowledge = updatedKnowledge;
 			toast.success($i18n.t('File content updated successfully.'));
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			savingFileContent = false;
 		}
 	};
 
@@ -799,9 +813,8 @@
 								<div>
 									<button
 										class="self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
-										on:click={() => {
-											updateFileContentHandler();
-										}}
+										disabled={savingFileContent}
+										on:click={updateFileContentHandler}
 									>
 										{$i18n.t('Save')}
 									</button>
@@ -857,9 +870,8 @@
 								<div>
 									<button
 										class="self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
-										on:click={() => {
-											updateFileContentHandler();
-										}}
+										disabled={savingFileContent}
+										on:click={updateFileContentHandler}
 									>
 										{$i18n.t('Save')}
 									</button>

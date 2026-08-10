@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time
+import uuid
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -38,6 +40,7 @@ from open_webui.utils.skill_runtime import (
     is_skill_package,
     install_skill_runtime,
     save_imported_skill_assets,
+    skill_assets_available,
     uninstall_skill_runtime,
 )
 from open_webui.utils.tools import get_tool_server_data
@@ -544,14 +547,83 @@ async def _upsert_imported_skill(user, payload: ImportedSkillPayload) -> SkillIm
             and (existing.source or "manual") == payload.source
             and (existing.source_url or None) == payload.source_url
         )
-        if same_hash and same_content:
+        if same_hash and same_content and skill_assets_available(existing):
             return SkillImportResult(skill=existing, status="unchanged")
+        staged = None
+        try:
+            persisted_meta = await run_in_threadpool(
+                lambda: save_imported_skill_assets(user.id, existing, payload)
+            )
+            staged = existing.model_copy(update={"meta": persisted_meta})
+            updated = Skills.update_skill_by_id(
+                existing.id,
+                SkillForm(
+                    name=payload.name,
+                    description=payload.description,
+                    content=payload.content,
+                    source=payload.source,
+                    identifier=payload.identifier,
+                    source_url=payload.source_url,
+                    meta=persisted_meta,
+                    access_control=existing.access_control,
+                    is_active=existing.is_active,
+                ),
+            )
+            if not updated:
+                await run_in_threadpool(
+                    lambda: cleanup_skill_assets(staged, strict=False)
+                )
+                raise HTTPException(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=ERROR_MESSAGES.DEFAULT("Error updating imported skill"),
+                )
+        except SkillRuntimeError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if staged is not None:
+                await run_in_threadpool(
+                    lambda: cleanup_skill_assets(staged, strict=False)
+                )
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=ERROR_MESSAGES.DEFAULT("Error updating imported skill"),
+            ) from exc
+        try:
+            await run_in_threadpool(lambda: uninstall_skill_runtime(existing))
+        except Exception:
+            log.exception("Failed to clean the previous skill runtime for %s", existing.id)
+        await run_in_threadpool(
+            lambda: cleanup_skill_assets(existing, strict=False)
+        )
+        return SkillImportResult(skill=updated, status="updated")
 
-        await run_in_threadpool(lambda: uninstall_skill_runtime(existing))
-        await run_in_threadpool(lambda: cleanup_skill_assets(existing))
-
-        updated = Skills.update_skill_by_id(
-            existing.id,
+    now = int(time.time())
+    skill_id = str(uuid.uuid4())
+    candidate = SkillModel(
+        id=skill_id,
+        user_id=user.id,
+        name=payload.name,
+        description=payload.description,
+        content=payload.content,
+        source=payload.source,
+        identifier=payload.identifier,
+        source_url=payload.source_url,
+        meta=payload.meta,
+        access_control={},
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    staged = None
+    try:
+        persisted_meta = await run_in_threadpool(
+            lambda: save_imported_skill_assets(user.id, candidate, payload)
+        )
+        staged = candidate.model_copy(update={"meta": persisted_meta})
+        created = Skills.insert_new_skill(
+            user.id,
             SkillForm(
                 name=payload.name,
                 description=payload.description,
@@ -559,79 +631,33 @@ async def _upsert_imported_skill(user, payload: ImportedSkillPayload) -> SkillIm
                 source=payload.source,
                 identifier=payload.identifier,
                 source_url=payload.source_url,
-                meta=payload.meta,
-                access_control=existing.access_control,
-                is_active=existing.is_active,
+                meta=persisted_meta,
+                access_control={},
+                is_active=True,
             ),
+            skill_id=skill_id,
         )
-        if not updated:
+        if not created:
+            await run_in_threadpool(
+                lambda: cleanup_skill_assets(staged, strict=False)
+            )
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=ERROR_MESSAGES.DEFAULT("Error updating imported skill"),
-            )
-        try:
-            persisted_meta = await run_in_threadpool(
-                lambda: save_imported_skill_assets(user.id, updated, payload)
-            )
-            if persisted_meta != (updated.meta or {}):
-                updated = Skills.update_skill_by_id(
-                    updated.id,
-                    SkillForm(
-                        name=updated.name,
-                        description=updated.description,
-                        content=updated.content,
-                        source=updated.source,
-                        identifier=updated.identifier,
-                        source_url=updated.source_url,
-                        meta=persisted_meta,
-                        access_control=updated.access_control,
-                        is_active=updated.is_active,
-                    ),
-                )
-        except SkillRuntimeError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        return SkillImportResult(skill=updated, status="updated")
-
-    created = Skills.insert_new_skill(
-        user.id,
-        SkillForm(
-            name=payload.name,
-            description=payload.description,
-            content=payload.content,
-            source=payload.source,
-            identifier=payload.identifier,
-            source_url=payload.source_url,
-            meta=payload.meta,
-            access_control={},
-            is_active=True,
-        ),
-    )
-    if not created:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT("Error creating imported skill"),
-        )
-    try:
-        persisted_meta = await run_in_threadpool(
-            lambda: save_imported_skill_assets(user.id, created, payload)
-        )
-        if persisted_meta != (created.meta or {}):
-            created = Skills.update_skill_by_id(
-                created.id,
-                SkillForm(
-                    name=created.name,
-                    description=created.description,
-                    content=created.content,
-                    source=created.source,
-                    identifier=created.identifier,
-                    source_url=created.source_url,
-                    meta=persisted_meta,
-                    access_control=created.access_control,
-                    is_active=created.is_active,
-                ),
+                detail=ERROR_MESSAGES.DEFAULT("Error creating imported skill"),
             )
     except SkillRuntimeError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if staged is not None:
+            await run_in_threadpool(
+                lambda: cleanup_skill_assets(staged, strict=False)
+            )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT("Error creating imported skill"),
+        ) from exc
     return SkillImportResult(skill=created, status="created")
 
 
@@ -970,7 +996,9 @@ async def uninstall_skill_runtime_route(
         )
 
     try:
-        next_meta = await run_in_threadpool(lambda: uninstall_skill_runtime(skill))
+        next_meta = await run_in_threadpool(
+            lambda: uninstall_skill_runtime(skill, strict_cleanup=True)
+        )
     except SkillRuntimeError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -1158,6 +1186,8 @@ async def delete_skill_by_id(skill_id: str, user=Depends(get_verified_user)):
             status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
         )
 
-    await run_in_threadpool(lambda: uninstall_skill_runtime(skill))
+    await run_in_threadpool(
+        lambda: uninstall_skill_runtime(skill, strict_cleanup=True)
+    )
     await run_in_threadpool(lambda: cleanup_skill_assets(skill))
     return Skills.delete_skill_by_id(skill_id)

@@ -58,6 +58,8 @@ from open_webui.utils.error_handling import (
     read_requests_error_payload,
 )
 from open_webui.utils.openai_responses import (
+    ResponsesCompatibilityError,
+    ResponsesProtocolError,
     collect_responses_response,
     collect_responses_response_from_text,
     convert_chat_completions_to_responses_payload,
@@ -65,6 +67,11 @@ from open_webui.utils.openai_responses import (
     iter_responses_events,
     resolve_responses_compatibility,
     responses_events_to_chat_completions_sse,
+    validate_responses_response,
+)
+from open_webui.utils.openai_compatibility import (
+    apply_chat_completion_token_parameter,
+    resolve_chat_completion_token_parameter,
 )
 from open_webui.utils.native_web_search import (
     build_native_web_search_support,
@@ -468,7 +475,7 @@ def _get_native_web_search_tool_type(api_config: dict) -> str:
     Prefer explicit config, otherwise default to OpenAI's hosted web search tool.
     """
     return resolve_responses_compatibility(api_config).get(
-        "native_web_search_tool_type", "web_search_preview"
+        "native_web_search_tool_type", "web_search"
     )
 
 
@@ -1684,6 +1691,16 @@ def openai_o1_o3_handler(payload):
     return payload
 
 
+def _validate_openai_api_configs(configs: Any) -> None:
+    if not isinstance(configs, dict):
+        raise ValueError("OPENAI_API_CONFIGS must be an object.")
+    for config in configs.values():
+        if not isinstance(config, dict):
+            raise ValueError("Each OpenAI API config must be an object.")
+        resolve_responses_compatibility(config)
+        resolve_chat_completion_token_parameter(config)
+
+
 ##########################################
 #
 # API routes
@@ -1714,6 +1731,11 @@ class OpenAIConfigForm(BaseModel):
 async def update_config(
     request: Request, form_data: OpenAIConfigForm, user=Depends(get_admin_user)
 ):
+    try:
+        _validate_openai_api_configs(form_data.OPENAI_API_CONFIGS)
+    except (ResponsesCompatibilityError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Preserve existing per-URL prefix_id to avoid breaking chats when admins edit connections.
     # prefix_id is an internal stable identifier used for uniqueness/routing and should not be user-editable.
     prev_urls = list(getattr(request.app.state.config, "OPENAI_API_BASE_URLS", []) or [])
@@ -2552,6 +2574,10 @@ async def health_check_connection(
         form_data.key or "",
         form_data.config or {},
     )
+    try:
+        _validate_openai_api_configs({"0": api_config})
+    except (ResponsesCompatibilityError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     attempts = get_api_key_attempts(
         provider="openai",
         connection_key=_get_openai_connection_key(api_config),
@@ -2628,16 +2654,15 @@ async def health_check_connection(
                 request_attempts = [(request_url, payload_dict)]
             else:
                 payload_dict = dict(probe_payload)
-
                 is_o1_o3 = payload_dict["model"].lower().startswith(("o1", "o3-"))
                 if is_o1_o3:
                     payload_dict = openai_o1_o3_handler(payload_dict)
-                elif "api.openai.com" not in url and "max_completion_tokens" in payload_dict:
-                    payload_dict["max_tokens"] = payload_dict["max_completion_tokens"]
-                    del payload_dict["max_completion_tokens"]
-
-                if "max_tokens" in payload_dict and "max_completion_tokens" in payload_dict:
-                    del payload_dict["max_tokens"]
+                payload_dict = apply_chat_completion_token_parameter(
+                    payload_dict,
+                    api_config=api_config,
+                    url=url,
+                    is_o1_o3=is_o1_o3,
+                )
 
                 request_attempts = _build_chat_completion_request_attempts(
                     url=url,
@@ -2757,6 +2782,8 @@ async def health_check_connection(
                     status_code=502,
                     detail="Invalid response from upstream model health check",
                 )
+            if use_responses_api:
+                validate_responses_response(response_body)
 
             elapsed_ms = max(1, int((time.monotonic() - started_at) * 1000))
             return {
@@ -2766,6 +2793,10 @@ async def health_check_connection(
             }
     except HTTPException:
         raise
+    except (ResponsesCompatibilityError, ResponsesProtocolError, ValueError) as e:
+        status_code = 502 if isinstance(e, ResponsesProtocolError) else 400
+        detail = e.error if isinstance(e, ResponsesProtocolError) else str(e)
+        raise HTTPException(status_code=status_code, detail=detail) from e
     except aiohttp.ClientError as e:
         log.exception(f"Client error: {str(e)}")
         raise HTTPException(
@@ -2846,6 +2877,11 @@ async def verify_responses_connection(
 
             body_text = _stringify_upstream_body(body)
             supports_responses = r.status < 400 and isinstance(body, dict)
+            if supports_responses:
+                try:
+                    validate_responses_response(body)
+                except ResponsesProtocolError:
+                    supports_responses = False
             endpoint_supported = None if supports_responses else not _looks_like_responses_endpoint_unsupported(r.status, body_text)
 
             return {
@@ -2949,6 +2985,10 @@ async def generate_chat_completion(
         api_config,
         url_idx=idx,
     )
+    try:
+        _validate_openai_api_configs({"0": api_config})
+    except (ResponsesCompatibilityError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if api_config.get("_resolved_model_id"):
         payload["model"] = api_config["_resolved_model_id"]
@@ -3027,18 +3067,15 @@ async def generate_chat_completion(
         # Responses API: keep to standard fields; conversion already filters most chat-only fields.
     else:
         # Chat Completions compatibility adjustments.
-        # Fix: o1,o3 do not support the "max_tokens" parameter; use max_completion_tokens.
         is_o1_o3 = payload["model"].lower().startswith(("o1", "o3-"))
         if is_o1_o3:
             payload = openai_o1_o3_handler(payload)
-        elif "api.openai.com" not in url:
-            # Remove "max_completion_tokens" from the payload for backward compatibility.
-            if "max_completion_tokens" in payload:
-                payload["max_tokens"] = payload["max_completion_tokens"]
-                del payload["max_completion_tokens"]
-
-        if "max_tokens" in payload and "max_completion_tokens" in payload:
-            del payload["max_tokens"]
+        payload = apply_chat_completion_token_parameter(
+            payload,
+            api_config=api_config,
+            url=url,
+            is_o1_o3=is_o1_o3,
+        )
 
         if "logit_bias" in payload:
             payload["logit_bias"] = json.loads(
@@ -3055,6 +3092,13 @@ async def generate_chat_completion(
             | ({"max_output_tokens"} if use_responses_api and resolve_responses_compatibility(api_config)["omit_max_output_tokens"] else set())
         ),
     )
+    if not use_responses_api:
+        payload_dict = apply_chat_completion_token_parameter(
+            payload_dict,
+            api_config=api_config,
+            url=url,
+            is_o1_o3=is_o1_o3,
+        )
     payload_dict = normalize_openai_compatible_reasoning_controls(
         payload_dict,
         model_id=model_id,
@@ -3409,9 +3453,10 @@ async def generate_chat_completion(
                         and r.status >= 500
                     ):
                         message += (
-                            "\nIf this connection uses Sub2API, set Responses API "
-                            "compatibility to 'sub2api' so HaloWebUI sends the "
-                            "supported 'web_search' tool instead of 'web_search_preview'."
+                            "\nThis connection is configured with the legacy "
+                            "'web_search_preview' tool. If the upstream implements "
+                            "the current Responses API, configure native web search "
+                            "to use 'web_search'."
                         )
                     if native_file_inputs:
                         message = (
@@ -3753,6 +3798,10 @@ async def generate_chat_completion(
         return response
     except HTTPException:
         raise
+    except (ResponsesCompatibilityError, ResponsesProtocolError, ValueError) as e:
+        status_code = 502 if isinstance(e, ResponsesProtocolError) else 400
+        detail = e.error if isinstance(e, ResponsesProtocolError) else str(e)
+        raise HTTPException(status_code=status_code, detail=detail) from e
     except Exception as e:
         log.exception(e)
 

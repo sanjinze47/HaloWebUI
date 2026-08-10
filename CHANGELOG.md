@@ -5,12 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Established project-wide product, architecture, provider, data, quality, and release contracts for ongoing fork maintenance.
+- Separated test builds (`edge` and `edge-slim`) from explicitly approved stable Docker releases (`latest` and `slim`).
+- Made frontend tests non-interactive and added isolated backend unit tests and bytecode compilation to CI.
+
+### Fixed
+
+- Restored actionable archive-upload guidance and aligned message-outline regression tests with rendered token paths.
+- Defaulted OpenAI Responses native web search in the backend and connection form to the current `web_search` tool while preserving explicit legacy `web_search_preview` configuration.
+- Fixed Socket authentication refresh, per-response chat task recovery, cross-chat failure isolation, queued multi-model completion, and retryable attachment deletion.
+- Fixed knowledge editing and indexing order, staged Skill repair, cross-platform migration locking, persistent secret-key resolution, and retryable knowledge, file, upload, and user cleanup.
+- Normalized OpenAI Responses terminal errors and stream/non-stream output, added explicit Gemini and token-parameter compatibility modes, and made Ollama response cleanup deterministic.
+
 ## [0.2.2] - 2026-08-07
 
 ### Fixed
 
 - Fixed Sub2API Responses native web search requests by using `web_search` in Sub2API compatibility mode.
-- Preserved the official OpenAI `web_search_preview` behavior for standard Responses connections.
+- Preserved explicit legacy `web_search_preview` configuration for standard Responses connections.
 - Added parsing for direct and nested Responses URL citations, including independent annotation events and final response annotations.
 - Added deduplicated OpenAI-style source cards with domain, favicon fallback, citation details, and safe external links.
 

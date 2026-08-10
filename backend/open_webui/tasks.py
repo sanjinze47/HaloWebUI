@@ -95,6 +95,27 @@ def list_task_ids_by_chat_id(id, *, blocks_completion_only: bool = False):
     ]
 
 
+def set_task_message_id(task_id: str, message_id: str | None) -> bool:
+    if task_id not in task_metadata or not message_id:
+        return False
+
+    task_metadata[task_id]["message_id"] = message_id
+    return True
+
+
+def list_tasks_by_chat_id(id, *, blocks_completion_only: bool = False):
+    return [
+        {
+            "task_id": task_id,
+            "message_id": metadata.get("message_id"),
+        }
+        for task_id in list_task_ids_by_chat_id(
+            id, blocks_completion_only=blocks_completion_only
+        )
+        if (metadata := task_metadata.get(task_id, {})).get("message_id")
+    ]
+
+
 async def stop_task(task_id: str):
     """
     Cancel a running task and remove it from the global task list.

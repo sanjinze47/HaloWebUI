@@ -48,6 +48,7 @@
 	import { localizeCommonError } from '$lib/utils/common-errors';
 	import { initScrollbarAutohide } from '$lib/utils/scrollbars';
 	import { setTextScale, TEXT_SCALE_DEFAULT } from '$lib/utils/text-scale';
+	import { createSocketAuthCallback, joinCurrentSocketSession } from '$lib/utils/socket-session';
 	import { getAllTags } from '$lib/apis/chats';
 	import { initPWAInstallSupport } from '$lib/utils/pwa';
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
@@ -99,6 +100,7 @@
 
 	const handleSocketConnect = () => {
 		console.log('connected', currentSocket?.id);
+		joinCurrentSocketSession(currentSocket, () => localStorage.token);
 	};
 
 	const handleSocketReconnectAttempt = (attempt) => {
@@ -203,7 +205,7 @@
 			randomizationFactor: 0.5,
 			path: '/ws/socket.io',
 			transports: enableWebsocket ? ['websocket'] : ['polling', 'websocket'],
-			auth: { token: localStorage.token }
+			auth: createSocketAuthCallback(() => localStorage.token)
 		});
 
 		currentSocket = _socket;
@@ -583,9 +585,17 @@
 		unsubscribeUser = user.subscribe((value) => {
 			if (value) {
 				attachSocketEventHandlers(currentSocket);
+				if (currentSocket && !currentSocket.connected) {
+					currentSocket.connect();
+				} else {
+					joinCurrentSocketSession(currentSocket, () => localStorage.token);
+				}
 			} else {
 				currentSocket?.off('chat-events', chatEventHandler);
 				currentSocket?.off('channel-events', channelEventHandler);
+				if (currentSocket?.connected) {
+					currentSocket.disconnect();
+				}
 			}
 		});
 
@@ -644,7 +654,7 @@
 							await applyBackendConfig(authenticatedBackendConfig);
 						}
 
-						$socket.emit('user-join', { auth: { token: sessionUser.token } });
+						joinCurrentSocketSession($socket, () => localStorage.token);
 
 						await user.set(sessionUser);
 					} else {

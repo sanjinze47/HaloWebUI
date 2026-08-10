@@ -67,12 +67,12 @@ class SkillForm(BaseModel):
 
 class SkillsTable:
     def insert_new_skill(
-        self, user_id: str, form_data: SkillForm
+        self, user_id: str, form_data: SkillForm, *, skill_id: Optional[str] = None
     ) -> Optional[SkillModel]:
         with get_db() as db:
             now = int(time.time())
             skill = SkillModel(
-                id=str(uuid.uuid4()),
+                id=skill_id or str(uuid.uuid4()),
                 user_id=user_id,
                 name=form_data.name,
                 description=form_data.description,
@@ -161,6 +161,15 @@ class SkillsTable:
             db.delete(skill)
             db.commit()
             return True
+
+    def delete_skills_by_user_id(self, user_id: str) -> bool:
+        with get_db() as db:
+            try:
+                db.query(Skill).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+            except Exception:
+                return False
 
 
 Skills = SkillsTable()

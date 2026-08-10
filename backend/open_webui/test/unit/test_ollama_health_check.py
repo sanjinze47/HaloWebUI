@@ -3,6 +3,9 @@ import json
 import pathlib
 import sys
 
+import pytest
+from fastapi import HTTPException
+
 
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parents[3]
 if str(_BACKEND_DIR) not in sys.path:
@@ -97,3 +100,78 @@ def test_ollama_health_check_discovers_model_and_appends_latest(monkeypatch):
     assert payload["model"] == "llama3.2:latest"
     assert payload["options"]["num_predict"] == 1
     assert payload["stream"] is False
+
+
+class _CleanupResponse:
+    def __init__(self):
+        self.status = 200
+        self.headers = {"Content-Type": "application/json"}
+        self.content = []
+        self.close_count = 0
+
+    def raise_for_status(self):
+        return None
+
+    async def json(self, content_type=None):
+        return {"message": {"content": "ok"}}
+
+    async def text(self):
+        return ""
+
+    def close(self):
+        self.close_count += 1
+
+
+class _CleanupSession:
+    def __init__(self, response):
+        self.response = response
+        self.close_count = 0
+
+    async def post(self, *args, **kwargs):
+        return self.response
+
+    async def close(self):
+        self.close_count += 1
+
+
+def test_ollama_stream_constructor_failure_keeps_cleanup_ownership(monkeypatch):
+    upstream_response = _CleanupResponse()
+    session = _CleanupSession(upstream_response)
+    monkeypatch.setattr(
+        ollama_router.aiohttp, "ClientSession", lambda *args, **kwargs: session
+    )
+
+    def fail_streaming_response(*args, **kwargs):
+        raise RuntimeError("stream response construction failed")
+
+    monkeypatch.setattr(ollama_router, "StreamingResponse", fail_streaming_response)
+
+    with pytest.raises(HTTPException):
+        asyncio.run(
+            ollama_router.send_post_request(
+                "http://localhost:11434/api/chat", b"{}", stream=True
+            )
+        )
+
+    assert upstream_response.close_count == 1
+    assert session.close_count == 1
+
+
+def test_ollama_stream_handoff_defers_cleanup_to_background_task(monkeypatch):
+    upstream_response = _CleanupResponse()
+    session = _CleanupSession(upstream_response)
+    monkeypatch.setattr(
+        ollama_router.aiohttp, "ClientSession", lambda *args, **kwargs: session
+    )
+
+    response = asyncio.run(
+        ollama_router.send_post_request(
+            "http://localhost:11434/api/chat", b"{}", stream=True
+        )
+    )
+
+    assert upstream_response.close_count == 0
+    assert session.close_count == 0
+    asyncio.run(response.background())
+    assert upstream_response.close_count == 1
+    assert session.close_count == 1

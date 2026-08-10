@@ -10,6 +10,7 @@ from pathlib import Path
 import markdown
 from bs4 import BeautifulSoup
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.secret_key import ensure_webui_secret_key
 
 ####################################
 # Load .env file
@@ -157,6 +158,9 @@ VERSION = PACKAGE_DATA["version"]
 # Function to parse each section
 def parse_section(section):
     items = []
+    if section is None:
+        return items
+
     for li in section.find_all("li"):
         # Extract raw HTML string
         raw_html = str(li)
@@ -173,6 +177,47 @@ def parse_section(section):
     return items
 
 
+def parse_changelog(changelog_content):
+    html_content = markdown.markdown(changelog_content)
+    soup = BeautifulSoup(html_content, "html.parser")
+    changelog_json = {}
+
+    for version in soup.find_all("h2"):
+        heading = version.get_text().strip()
+        if heading.casefold() == "[unreleased]":
+            continue
+
+        heading_parts = heading.split(" - ", 1)
+        if len(heading_parts) != 2:
+            continue
+
+        version_label, date = heading_parts
+        if not (version_label.startswith("[") and version_label.endswith("]")):
+            continue
+
+        version_number = version_label[1:-1].strip()
+        if not version_number or not date.strip():
+            continue
+
+        version_data = {"date": date}
+        current = version.find_next_sibling()
+
+        while current and current.name != "h2":
+            if current.name == "h3":
+                section_title = current.get_text().lower()
+                section_list = current.find_next_sibling()
+                section_items = parse_section(
+                    section_list if section_list and section_list.name == "ul" else None
+                )
+                version_data[section_title] = section_items
+
+            current = current.find_next_sibling()
+
+        changelog_json[version_number] = version_data
+
+    return changelog_json
+
+
 def load_changelog():
     try:
         changelog_path = BASE_DIR / "CHANGELOG.md"
@@ -183,27 +228,7 @@ def load_changelog():
             pkgutil.get_data("open_webui", "CHANGELOG.md") or b""
         ).decode()
 
-    html_content = markdown.markdown(changelog_content)
-    soup = BeautifulSoup(html_content, "html.parser")
-    changelog_json = {}
-
-    for version in soup.find_all("h2"):
-        version_number = version.get_text().strip().split(" - ")[0][1:-1]
-        date = version.get_text().strip().split(" - ")[1]
-        version_data = {"date": date}
-        current = version.find_next_sibling()
-
-        while current and current.name != "h2":
-            if current.name == "h3":
-                section_title = current.get_text().lower()
-                section_items = parse_section(current.find_next_sibling("ul"))
-                version_data[section_title] = section_items
-
-            current = current.find_next_sibling()
-
-        changelog_json[version_number] = version_data
-
-    return changelog_json
+    return parse_changelog(changelog_content)
 
 
 CHANGELOG = load_changelog()
@@ -255,6 +280,8 @@ if FROM_INIT_PY:
         shutil.rmtree(DATA_DIR)
 
     DATA_DIR = Path(os.getenv("DATA_DIR", OPEN_WEBUI_DIR / "data"))
+
+ensure_webui_secret_key(data_dir=DATA_DIR)
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", OPEN_WEBUI_DIR / "static"))
 
@@ -388,9 +415,7 @@ WEBUI_ADMIN_NAME = os.environ.get("WEBUI_ADMIN_NAME", "Admin")
 
 WEBUI_SECRET_KEY = os.environ.get(
     "WEBUI_SECRET_KEY",
-    os.environ.get(
-        "WEBUI_JWT_SECRET_KEY", "t0p-s3cr3t"
-    ),  # DEPRECATED: remove at next major version
+    os.environ.get("WEBUI_JWT_SECRET_KEY", ""),
 )
 
 WEBUI_SESSION_COOKIE_SAME_SITE = os.environ.get("WEBUI_SESSION_COOKIE_SAME_SITE", "lax")

@@ -561,7 +561,13 @@ export const getChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const getChatContextById = async (token: string, id: string) => {
+export type ChatContext = {
+	tags: unknown[];
+	task_ids: string[];
+	tasks: { task_id: string; message_id: string }[];
+};
+
+export const getChatContextById = async (token: string, id: string): Promise<ChatContext> => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/context`, {
@@ -586,9 +592,10 @@ export const getChatContextById = async (token: string, id: string) => {
 	return (
 		res ?? {
 			tags: [],
-			task_ids: []
+			task_ids: [],
+			tasks: []
 		}
-	);
+	) as ChatContext;
 };
 
 export const getSharedChatList = async (token: string = '') => {

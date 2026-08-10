@@ -74,6 +74,29 @@ def test_has_collection_treats_legacy_config_error_as_missing():
     assert chroma_client.has_collection("file-demo") is False
 
 
+def test_delete_ignores_only_missing_collection_errors():
+    class _Client:
+        def get_collection(self, name):
+            raise _MissingCollectionError(f"Collection {name} not found")
+
+    chroma_client = ChromaClient.__new__(ChromaClient)
+    chroma_client.client = _Client()
+
+    assert chroma_client.delete("file-demo", ids=["chunk-1"]) is None
+
+
+def test_delete_propagates_backend_errors():
+    class _Client:
+        def get_collection(self, name):
+            raise RuntimeError("backend unavailable")
+
+    chroma_client = ChromaClient.__new__(ChromaClient)
+    chroma_client.client = _Client()
+
+    with pytest.raises(RuntimeError, match="backend unavailable"):
+        chroma_client.delete("file-demo", ids=["chunk-1"])
+
+
 def test_insert_sanitizes_metadata_before_add(monkeypatch):
     collection = _Collection()
     chroma_client = ChromaClient.__new__(ChromaClient)

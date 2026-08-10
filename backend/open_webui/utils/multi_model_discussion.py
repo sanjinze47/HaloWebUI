@@ -11,7 +11,7 @@ from starlette.responses import Response
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL, SRC_LOG_LEVELS
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
-from open_webui.tasks import create_task
+from open_webui.tasks import create_task, set_task_message_id
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.model_identity import resolve_model_from_lookup
 from open_webui.utils.models import check_model_access
@@ -806,6 +806,7 @@ async def generate_multi_model_discussion_completion(
             )
 
     task_id, _task = create_task(discussion_task(), id=chat_id)
+    set_task_message_id(task_id, message_id)
     Chats.upsert_message_to_chat_by_id_and_message_id(
         chat_id,
         message_id,

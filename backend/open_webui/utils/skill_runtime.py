@@ -431,6 +431,8 @@ def select_auto_skill_ids(
     existing = {str(skill_id or "").strip() for skill_id in (existing_skill_ids or [])}
     scored: list[tuple[int, int, SkillModel]] = []
     for skill in Skills.get_skills():
+        if not skill.is_active:
+            continue
         if skill.id in existing:
             continue
         if not skill_supports_auto_activation(skill):
@@ -476,6 +478,10 @@ def _save_private_archive_file(
         ),
     )
     if not file_item:
+        try:
+            Storage.delete_file(file_path)
+        except Exception:
+            pass
         raise SkillRuntimeError("Failed to save the imported skill archive.")
 
     return {
@@ -486,43 +492,82 @@ def _save_private_archive_file(
     }
 
 
-def _delete_archive_file(file_id: Optional[str]) -> None:
+def _delete_archive_file(file_id: Optional[str], *, strict: bool = False) -> None:
     if not file_id:
         return
 
-    file = Files.get_file_by_id(file_id)
+    file = Files.get_file_by_id(file_id, include_pending=True)
+    if not file:
+        return
     if file and file.path:
         try:
             Storage.delete_file(file.path)
-        except Exception:
-            pass
-    Files.delete_file_by_id(file_id)
+        except Exception as exc:
+            if strict:
+                raise SkillRuntimeError(
+                    f"Failed to delete skill archive {file_id}: {exc}"
+                ) from exc
+            return
+    if not Files.delete_file_by_id(file_id) and strict:
+        raise SkillRuntimeError(f"Failed to delete skill archive record {file_id}.")
 
 
-def _remove_tree(path: Optional[str]) -> None:
+def _remove_tree(path: Optional[str], *, strict: bool = False) -> None:
     if not path:
         return
+    target = Path(path)
+    if not target.exists() and not target.is_symlink():
+        return
     try:
-        shutil.rmtree(path, ignore_errors=True)
+        shutil.rmtree(target, ignore_errors=not strict)
+    except Exception as exc:
+        if strict:
+            raise SkillRuntimeError(f"Failed to delete skill directory {path}: {exc}") from exc
+
+
+def skill_assets_available(skill: SkillModel) -> bool:
+    package = _skill_package_meta(skill)
+    if not package:
+        return False
+    extracted_root = package.get("extracted_root")
+    archive_file_id = package.get("archive_file_id")
+    if not extracted_root or not archive_file_id:
+        return False
+    root = Path(extracted_root)
+    if not root.is_dir():
+        return False
+
+    expected_files = package.get("files")
+    if not isinstance(expected_files, list) or not expected_files:
+        expected_files = ["SKILL.md"]
+    try:
+        for relative_path in expected_files:
+            target = root / _safe_relative_path(relative_path)
+            _ensure_path_within(root, target)
+            if not target.is_file():
+                return False
+    except SkillRuntimeError:
+        return False
+
+    archive = Files.get_file_by_id(archive_file_id)
+    if not archive or not archive.path:
+        return False
+    try:
+        archive_path = Storage.get_file(archive.path)
+        return bool(archive_path and Path(archive_path).is_file())
     except Exception:
-        pass
+        return False
 
 
 def save_imported_skill_assets(user_id: str, skill: SkillModel, payload: Any) -> dict[str, Any]:
     package_files_map = getattr(payload, "package_files_map", None) or {}
     archive_bytes = getattr(payload, "archive_bytes", None)
     archive_name = getattr(payload, "archive_name", None) or f"{skill.id}.zip"
-    current_meta = _skill_meta_dict(skill)
-    current_package = (
-        current_meta.get("package") if isinstance(current_meta.get("package"), dict) else {}
-    )
+    next_meta = dict(getattr(payload, "meta", None) or {})
 
     if not package_files_map or archive_bytes is None:
-        if current_package:
-            _remove_tree(current_package.get("extracted_root"))
-            _delete_archive_file(current_package.get("archive_file_id"))
-            current_meta.pop("package", None)
-        return current_meta
+        next_meta.pop("package", None)
+        return next_meta
 
     if len(archive_bytes) > SKILL_ARCHIVE_MAX_BYTES:
         raise SkillRuntimeError("Skill archive exceeds the 50MB upload limit.")
@@ -534,42 +579,48 @@ def save_imported_skill_assets(user_id: str, skill: SkillModel, payload: Any) ->
     if total_source_bytes > SKILL_SOURCE_MAX_BYTES:
         raise SkillRuntimeError("Skill package exceeds the 200MB extracted source limit.")
 
-    if current_package:
-        _remove_tree(current_package.get("extracted_root"))
-        _delete_archive_file(current_package.get("archive_file_id"))
+    import_hash = str(payload.meta.get("import_hash") or "latest")
+    package_parent = SKILL_SOURCE_CACHE_DIR / skill.id
+    package_parent.mkdir(parents=True, exist_ok=True)
+    stage_root = package_parent / f".staging-{uuid.uuid4().hex}"
+    extracted_root = stage_root / "src"
+    archive_file = None
+    try:
+        extracted_root.mkdir(parents=True, exist_ok=False)
+        for relative_path, content in package_files_map.items():
+            relative = _safe_relative_path(relative_path)
+            target_path = extracted_root / relative
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_path_within(extracted_root, target_path)
+            target_path.write_bytes(content)
 
-    extracted_root = SKILL_SOURCE_CACHE_DIR / skill.id / str(payload.meta.get("import_hash") or "latest") / "src"
-    _remove_tree(str(extracted_root))
-    extracted_root.mkdir(parents=True, exist_ok=True)
-
-    for relative_path, content in package_files_map.items():
-        relative = _safe_relative_path(relative_path)
-        target_path = extracted_root / relative
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        _ensure_path_within(extracted_root, target_path)
-        target_path.write_bytes(content)
-
-    archive_file = _save_private_archive_file(user_id, skill.id, archive_name, archive_bytes)
-
-    next_meta = {
-        **current_meta,
-        "package": {
+        archive_file = _save_private_archive_file(
+            user_id, skill.id, archive_name, archive_bytes
+        )
+        version_root = package_parent / f"{import_hash}-{uuid.uuid4().hex}"
+        os.replace(stage_root, version_root)
+        final_root = version_root / "src"
+        next_meta["package"] = {
             "archive_file_id": archive_file["id"],
             "archive_filename": archive_file["filename"],
             "archive_size": archive_file["size"],
             "import_hash": payload.meta.get("import_hash"),
-            "extracted_root": str(extracted_root),
+            "extracted_root": str(final_root),
             "files": sorted(package_files_map.keys()),
             "source_bytes": total_source_bytes,
-        },
-    }
-    return next_meta
+        }
+        return next_meta
+    except Exception:
+        _remove_tree(str(stage_root))
+        if archive_file:
+            _delete_archive_file(archive_file["id"])
+        raise
 
 
-def cleanup_skill_assets(skill: SkillModel) -> None:
+def cleanup_skill_assets(skill: SkillModel, *, strict: bool = True) -> None:
     package = _skill_package_meta(skill)
-    _remove_tree(package.get("extracted_root"))
-    _delete_archive_file(package.get("archive_file_id"))
+    _remove_tree(package.get("extracted_root"), strict=strict)
+    _delete_archive_file(package.get("archive_file_id"), strict=strict)
 
 
 def _other_skills_use_installed_hash(skill_id: str, installed_hash: Optional[str]) -> bool:
@@ -585,32 +636,37 @@ def _other_skills_use_installed_hash(skill_id: str, installed_hash: Optional[str
     return False
 
 
-def _unlink_skill_node_modules(skill_root: Path) -> None:
+def _unlink_skill_node_modules(skill_root: Path, *, strict: bool = False) -> None:
     node_modules = skill_root / "node_modules"
     try:
         if node_modules.is_symlink() or node_modules.exists():
             if node_modules.is_dir() and not node_modules.is_symlink():
-                shutil.rmtree(node_modules, ignore_errors=True)
+                shutil.rmtree(node_modules, ignore_errors=not strict)
             else:
                 node_modules.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        if strict:
+            raise SkillRuntimeError(
+                f"Failed to unlink skill node modules in {skill_root}: {exc}"
+            ) from exc
 
 
-def uninstall_skill_runtime(skill: SkillModel) -> dict[str, Any]:
+def uninstall_skill_runtime(
+    skill: SkillModel, *, strict_cleanup: bool = False
+) -> dict[str, Any]:
     meta = _skill_meta_dict(skill)
     runtime = _skill_runtime_meta(skill)
     installed_hash = runtime.get("installed_hash")
     skill_root_value = _skill_package_meta(skill).get("extracted_root")
     skill_root = Path(skill_root_value) if skill_root_value else None
     if skill_root and skill_root.exists():
-        _unlink_skill_node_modules(skill_root)
+        _unlink_skill_node_modules(skill_root, strict=strict_cleanup)
 
     if runtime.get("python_env_dir") and not _other_skills_use_installed_hash(skill.id, installed_hash):
-        _remove_tree(runtime.get("python_env_dir"))
+        _remove_tree(runtime.get("python_env_dir"), strict=strict_cleanup)
 
     if runtime.get("node_env_dir") and not _other_skills_use_installed_hash(skill.id, installed_hash):
-        _remove_tree(runtime.get("node_env_dir"))
+        _remove_tree(runtime.get("node_env_dir"), strict=strict_cleanup)
 
     if runtime.get("mode") == "prompt_only":
         runtime["install_status"] = SKILL_RUNTIME_STATUS_PROMPT_ONLY
@@ -908,6 +964,8 @@ def execute_skill_entrypoint(
     args: Optional[dict[str, Any]] = None,
     timeout: Optional[int] = None,
 ) -> dict[str, Any]:
+    if not skill.is_active:
+        raise SkillRuntimeError("This skill is disabled.")
     runtime = _skill_runtime_meta(skill)
     package = _skill_package_meta(skill)
 
@@ -1020,6 +1078,8 @@ def get_visible_skill_map(user: Any, skill_ids: list[str]) -> dict[str, SkillMod
         skill = Skills.get_skill_by_id(skill_id)
         if not skill:
             continue
+        if not skill.is_active:
+            continue
         if not can_read_resource(user, skill):
             continue
         visible[skill.id] = skill
@@ -1043,6 +1103,8 @@ def get_selected_skill_context(
     runnable_skills: list[SkillModel] = []
 
     for skill in visible_skills:
+        if not skill.is_active:
+            continue
         runtime = _skill_runtime_meta(skill)
         if runtime.get("mode") == "runnable":
             runnable_skills.append(skill)
@@ -1062,6 +1124,8 @@ def build_skill_tool_context(runnable_skills: list[SkillModel]) -> dict[str, Any
     entries: list[dict[str, Any]] = []
     enabled_skill_ids: list[str] = []
     for skill in runnable_skills:
+        if not skill.is_active:
+            continue
         runtime = _skill_runtime_meta(skill)
         if runtime.get("install_status") != SKILL_RUNTIME_STATUS_READY:
             continue
@@ -1087,6 +1151,7 @@ def build_skill_system_prompt(
     prompt_skills: list[SkillModel],
     requested_skill_ids: Optional[list[str]] = None,
 ) -> Optional[str]:
+    prompt_skills = [skill for skill in prompt_skills if skill.is_active]
     if not prompt_skills:
         return None
 

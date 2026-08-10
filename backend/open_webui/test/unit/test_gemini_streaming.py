@@ -175,12 +175,103 @@ def test_image_compat_payloads_keep_response_modalities():
         "tools": [{"googleSearch": {}}],
     }
 
-    compat_payloads = gemini_router._iter_gemini_compat_payloads(
-        payload, allow_drop_response_modalities=False
+    compat_payload = gemini_router._build_compat_payload(
+        payload,
+        drop_tools=True,
+        drop_thinking=True,
+        drop_response_modalities=False,
     )
 
-    assert compat_payloads
-    assert all(
-        compat_payload.get("generationConfig", {}).get("responseModalities") == ["TEXT", "IMAGE"]
-        for compat_payload in compat_payloads
+    assert compat_payload.get("generationConfig", {}).get("responseModalities") == [
+        "TEXT",
+        "IMAGE",
+    ]
+
+
+class _CompatResponse:
+    def __init__(self, status, body):
+        self.status = status
+        self._body = body
+        self.release_count = 0
+
+    async def text(self):
+        return json.dumps(self._body)
+
+    def release(self):
+        self.release_count += 1
+
+
+class _CompatSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.payloads = []
+
+    async def post(self, url, json=None, headers=None):
+        self.payloads.append(json)
+        return self.responses.pop(0)
+
+
+def test_gemini_auto_retries_only_the_rejected_optional_capability():
+    first = _CompatResponse(
+        400,
+        {"error": {"message": "thinkingConfig is not supported by this model"}},
     )
+    second = _CompatResponse(200, {})
+    session = _CompatSession([first, second])
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {
+            "thinkingConfig": {"thinkingBudget": 1024},
+            "temperature": 0.2,
+        },
+    }
+
+    response, used_payload, status, _error = asyncio.run(
+        gemini_router._open_gemini_response(
+            session,
+            [("https://example.test/generateContent", {})],
+            payload,
+            log_prefix="test",
+            compatibility_mode="auto",
+        )
+    )
+
+    assert response is second
+    assert status == 200
+    assert len(session.payloads) == 2
+    assert "thinkingConfig" not in used_payload["generationConfig"]
+    assert used_payload["tools"] == payload["tools"]
+    assert used_payload["generationConfig"]["temperature"] == 0.2
+    assert first.release_count == 1
+
+
+def test_gemini_strict_and_required_capabilities_do_not_retry():
+    error_body = {
+        "error": {"message": "thinkingConfig is not supported by this model"}
+    }
+
+    for mode, required in (("strict", set()), ("auto", {"thinking"})):
+        first = _CompatResponse(400, error_body)
+        session = _CompatSession([first])
+        response, used_payload, status, _error = asyncio.run(
+            gemini_router._open_gemini_response(
+                session,
+                [("https://example.test/generateContent", {})],
+                {
+                    "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+                    "generationConfig": {
+                        "thinkingConfig": {"thinkingBudget": 1024}
+                    },
+                },
+                log_prefix="test",
+                compatibility_mode=mode,
+                required_capabilities=required,
+            )
+        )
+
+        assert response is None
+        assert used_payload is None
+        assert status == 400
+        assert len(session.payloads) == 1
+        assert first.release_count == 1

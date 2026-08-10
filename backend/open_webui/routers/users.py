@@ -6,6 +6,9 @@ from typing import Any, Optional
 from open_webui.models.auths import Auths
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
+from open_webui.models.files import Files
+from open_webui.models.knowledge import Knowledges
+from open_webui.models.skills import Skills
 from open_webui.models.users import (
     UserModel,
     UserRoleUpdateForm,
@@ -41,6 +44,9 @@ from open_webui.utils.user_default_settings import (
     DEFAULT_NEW_USER_DEFAULT_SETTINGS,
     sanitize_new_user_default_settings,
 )
+from open_webui.retrieval.vector.connector import VECTOR_DB_CLIENT
+from open_webui.utils.skill_runtime import cleanup_skill_assets, uninstall_skill_runtime
+from open_webui.utils.file_cleanup import cleanup_file_dependencies
 
 
 log = logging.getLogger(__name__)
@@ -533,17 +539,107 @@ async def update_user_by_id(
 ############################
 
 
+def _cleanup_user_owned_resources(user_id: str) -> list[dict[str, str]]:
+    failures: list[dict[str, str]] = []
+
+    try:
+        skills = Skills.get_skills_by_user_id(user_id)
+    except Exception as exc:
+        skills = []
+        failures.append({"type": "skills", "id": user_id, "error": str(exc)})
+
+    for skill in skills:
+        try:
+            uninstall_skill_runtime(skill, strict_cleanup=True)
+            cleanup_skill_assets(skill)
+            if not Skills.delete_skill_by_id(skill.id):
+                raise RuntimeError("failed to delete skill record")
+        except Exception as exc:
+            failures.append({"type": "skill", "id": skill.id, "error": str(exc)})
+
+    try:
+        owned_knowledge = [
+            item
+            for item in Knowledges.get_knowledge_bases()
+            if item.user_id == user_id
+        ]
+    except Exception as exc:
+        owned_knowledge = []
+        failures.append({"type": "knowledge", "id": user_id, "error": str(exc)})
+
+    for knowledge in owned_knowledge:
+        try:
+            if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge.id):
+                VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
+            if not Knowledges.delete_knowledge_by_id(knowledge.id):
+                raise RuntimeError("failed to delete knowledge record")
+        except Exception as exc:
+            failures.append(
+                {"type": "knowledge", "id": knowledge.id, "error": str(exc)}
+            )
+
+    try:
+        files = Files.get_files_by_user_id(user_id, include_pending=True)
+    except Exception as exc:
+        files = []
+        failures.append({"type": "files", "id": user_id, "error": str(exc)})
+
+    for file in files:
+        try:
+            pending = Files.update_file_metadata_by_id(
+                file.id,
+                {"deletion_pending": True, "deletion_last_error": None},
+            )
+            if not pending:
+                raise RuntimeError("failed to mark file for deletion")
+            cleanup_file_dependencies(file)
+            if not Files.delete_file_by_id(file.id):
+                raise RuntimeError("failed to delete file record")
+        except Exception as exc:
+            Files.update_file_metadata_by_id(
+                file.id,
+                {"deletion_pending": True, "deletion_last_error": str(exc)},
+            )
+            failures.append({"type": "file", "id": file.id, "error": str(exc)})
+
+    return failures
+
+
 @router.delete("/{user_id}", response_model=bool)
 async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
     if user.id != user_id:
-        result = Auths.delete_auth_by_id(user_id)
+        failures = _cleanup_user_owned_resources(user_id)
+        if failures:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "user_cleanup_failed",
+                    "message": "User resource cleanup is incomplete and can be retried.",
+                    "resources": failures,
+                },
+            )
+        failures.extend(Users.cleanup_user_resources_by_id(user_id))
+        if failures:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "user_cleanup_failed",
+                    "message": "User database cleanup is incomplete and can be retried.",
+                    "resources": failures,
+                },
+            )
+        result = Auths.delete_auth_and_user_record_by_id(user_id)
 
         if result:
             return True
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DELETE_USER_ERROR,
+            detail={
+                "code": "user_cleanup_failed",
+                "message": "Identity cleanup failed and can be retried.",
+                "resources": [{"type": "identity", "id": user_id}],
+            },
         )
 
     raise HTTPException(

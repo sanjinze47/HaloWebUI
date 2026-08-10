@@ -7,7 +7,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, List, Literal, Optional, Sequence, Union
+from typing import Any, Callable, Iterator, List, Literal, Optional, Sequence, Union
 from urllib.parse import urlparse
 
 from fastapi import (
@@ -1674,6 +1674,7 @@ def save_docs_to_vector_db(
     split: bool = True,
     add: bool = False,
     user=None,
+    after_insert: Optional[Callable[[], None]] = None,
 ) -> bool:
     def _get_docs_info(docs: list[Document]) -> str:
         docs_info = set()
@@ -1695,7 +1696,10 @@ def save_docs_to_vector_db(
         f"save_docs_to_vector_db: document {_get_docs_info(docs)} {collection_name}"
     )
 
-    # Check if entries with the same hash (metadata.hash) already exist
+    replacement_result = None
+    replacement_ids: list[str] = []
+    # Inspect existing entries without mutating them. Replacement only starts
+    # after parsing, chunking and embedding have all succeeded.
     if metadata and "hash" in metadata:
         result = VECTOR_DB_CLIENT.query(
             collection_name=collection_name,
@@ -1706,11 +1710,8 @@ def save_docs_to_vector_db(
             existing_doc_ids = result.ids[0]
             if existing_doc_ids:
                 if overwrite:
-                    log.info(f"Overwriting document with hash {metadata['hash']} ({len(existing_doc_ids)} chunks)")
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=collection_name,
-                        ids=existing_doc_ids,
-                    )
+                    replacement_result = result
+                    replacement_ids = list(existing_doc_ids)
                 else:
                     log.info(f"Document with hash {metadata['hash']} already exists")
                     raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
@@ -1726,15 +1727,12 @@ def save_docs_to_vector_db(
             if stale_result is not None:
                 stale_ids = stale_result.ids[0]
                 if stale_ids:
-                    log.info(
-                        f"Removing {len(stale_ids)} stale vectors for file_id={metadata['file_id']}"
-                    )
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=collection_name,
-                        ids=stale_ids,
-                    )
+                    replacement_result = stale_result
+                    replacement_ids = list(stale_ids)
         except Exception as e:
-            log.warning(f"Failed to clean stale vectors for file_id={metadata.get('file_id')}: {e}")
+            raise RuntimeError(
+                f"Failed to inspect stale vectors for file_id={metadata.get('file_id')}: {e}"
+            ) from e
 
     if split:
         if getattr(
@@ -1835,45 +1833,151 @@ def save_docs_to_vector_db(
             ):
                 metadata[key] = str(value)
 
+    embeddings = request.app.state.EMBEDDING_FUNCTION(
+        list(map(lambda x: x.replace("\n", " "), texts)),
+        prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+        user=user,
+    )
+    items = [
+        {
+            "id": str(uuid.uuid4()),
+            "text": text,
+            "vector": embeddings[idx],
+            "metadata": metadatas[idx],
+        }
+        for idx, text in enumerate(texts)
+    ]
+
+    rollback_items = []
+    if replacement_result and replacement_result.documents:
+        old_texts = replacement_result.documents[0] or []
+        old_metadatas = (replacement_result.metadatas or [[]])[0] or []
+        stored_embeddings = getattr(replacement_result, "embeddings", None)
+        old_embeddings = (
+            stored_embeddings[0]
+            if stored_embeddings
+            and stored_embeddings[0]
+            and len(stored_embeddings[0]) == len(old_texts)
+            else request.app.state.EMBEDDING_FUNCTION(
+                [text.replace("\n", " ") for text in old_texts],
+                prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+                user=user,
+            )
+        )
+        rollback_items = [
+            {
+                "id": replacement_ids[idx],
+                "text": text,
+                "vector": old_embeddings[idx],
+                "metadata": old_metadatas[idx],
+            }
+            for idx, text in enumerate(old_texts)
+        ]
+
+    replacement_started = False
     try:
         if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
             log.info(f"collection {collection_name} already exists")
 
             if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f"deleting existing collection {collection_name}")
+                if metadata and metadata.get("file_id"):
+                    if replacement_ids:
+                        replacement_started = True
+                        VECTOR_DB_CLIENT.delete(
+                            collection_name=collection_name, ids=replacement_ids
+                        )
+                else:
+                    replacement_started = True
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
+                    log.info(f"deleting existing collection {collection_name}")
             elif add is False:
                 log.info(
                     f"collection {collection_name} already exists, overwrite is False and add is False"
                 )
+                if after_insert is not None:
+                    after_insert()
                 return True
 
         log.info(f"adding to collection {collection_name}")
-        embeddings = request.app.state.EMBEDDING_FUNCTION(
-            list(map(lambda x: x.replace("\n", " "), texts)),
-            prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-            user=user,
-        )
-
-        items = [
-            {
-                "id": str(uuid.uuid4()),
-                "text": text,
-                "vector": embeddings[idx],
-                "metadata": metadatas[idx],
-            }
-            for idx, text in enumerate(texts)
-        ]
-
         VECTOR_DB_CLIENT.insert(
             collection_name=collection_name,
             items=items,
         )
+        if after_insert is not None:
+            after_insert()
 
         return True
     except Exception as e:
         log.exception(e)
+        # Insert may have partially succeeded, and the caller's metadata commit
+        # may fail after a complete insert. Remove the candidate vectors first.
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=collection_name,
+                ids=[item["id"] for item in items],
+            )
+        except Exception:
+            log.exception("Failed to remove replacement vector entries")
+
+        if replacement_started and rollback_items:
+            try:
+                # A failed delete may have removed only part of the previous
+                # set. Normalize that set before restoring the full snapshot.
+                if replacement_ids:
+                    VECTOR_DB_CLIENT.delete(
+                        collection_name=collection_name, ids=replacement_ids
+                    )
+                VECTOR_DB_CLIENT.insert(
+                    collection_name=collection_name, items=rollback_items
+                )
+            except Exception:
+                log.exception("Failed to restore the previous vector entries")
         raise e
+
+
+def restore_vector_snapshot(
+    request: Request,
+    collection_name: str,
+    snapshot,
+    *,
+    user=None,
+) -> None:
+    if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
+        VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
+
+    if snapshot is None or not snapshot.ids or not snapshot.documents:
+        return
+
+    ids = list(snapshot.ids[0] or [])
+    texts = list(snapshot.documents[0] or [])
+    metadatas = list((snapshot.metadatas or [[]])[0] or [])
+    if not ids or len(ids) != len(texts) or len(metadatas) != len(texts):
+        raise RuntimeError("Knowledge vector snapshot is incomplete.")
+
+    stored_embeddings = getattr(snapshot, "embeddings", None)
+    embeddings = (
+        stored_embeddings[0]
+        if stored_embeddings
+        and stored_embeddings[0]
+        and len(stored_embeddings[0]) == len(texts)
+        else request.app.state.EMBEDDING_FUNCTION(
+            [text.replace("\n", " ") for text in texts],
+            prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+            user=user,
+        )
+    )
+    VECTOR_DB_CLIENT.insert(
+        collection_name=collection_name,
+        items=[
+            {
+                "id": ids[index],
+                "text": text,
+                "vector": embeddings[index],
+                "metadata": metadatas[index],
+            }
+            for index, text in enumerate(texts)
+        ],
+    )
 
 
 class ProcessFileForm(BaseModel):
@@ -2205,30 +2309,18 @@ def process_file(
             processing_mode=processing_mode,
             provider=resolved_provider,
         )
-        Files.update_file_data_by_id(file.id, {"content": text_content})
-
         hash = calculate_sha256_string(text_content)
-        Files.update_file_hash_by_id(file.id, hash)
 
         if should_index_for_mode(processing_mode):
-            result = save_docs_to_vector_db(
-                request,
-                docs=docs,
-                collection_name=collection_name,
-                metadata={
-                    "file_id": file.id,
-                    "name": file.filename,
-                    "hash": hash,
-                },
-                overwrite=form_data.overwrite,
-                add=(True if form_data.collection_name else False),
-                user=user,
-            )
+            persisted_file = None
 
-            if result:
-                Files.update_file_metadata_by_id(
+            def persist_processed_file() -> None:
+                nonlocal persisted_file
+                persisted_file = Files.update_file_processing_by_id(
                     file.id,
-                    {
+                    data={"content": text_content},
+                    hash=hash,
+                    meta={
                         "collection_name": collection_name,
                         "processing_mode": processing_mode,
                         "resolved_processing_mode": processing_mode,
@@ -2241,7 +2333,25 @@ def process_file(
                         "fallback_reason": fallback_reason,
                     },
                 )
+                if not persisted_file:
+                    raise RuntimeError("Failed to persist processed file state")
 
+            result = save_docs_to_vector_db(
+                request,
+                docs=docs,
+                collection_name=collection_name,
+                metadata={
+                    "file_id": file.id,
+                    "name": file.filename,
+                    "hash": hash,
+                },
+                overwrite=form_data.overwrite,
+                add=(True if form_data.collection_name else False),
+                user=user,
+                after_insert=persist_processed_file,
+            )
+
+            if result:
                 return {
                     "status": True,
                     "collection_name": collection_name,
@@ -2256,9 +2366,11 @@ def process_file(
                 }
         else:
             _clear_standalone_file_collection(file.id)
-            Files.update_file_metadata_by_id(
+            persisted = Files.update_file_processing_by_id(
                 file.id,
-                {
+                data={"content": text_content},
+                hash=hash,
+                meta={
                     "collection_name": None,
                     "processing_mode": processing_mode,
                     "resolved_processing_mode": processing_mode,
@@ -2271,6 +2383,8 @@ def process_file(
                     "fallback_reason": fallback_reason,
                 },
             )
+            if not persisted:
+                raise RuntimeError("Failed to persist processed file state")
             return {
                 "status": True,
                 "collection_name": None,

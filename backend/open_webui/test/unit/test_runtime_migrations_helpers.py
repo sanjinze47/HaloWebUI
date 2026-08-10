@@ -15,10 +15,25 @@ from open_webui.runtime_migrations import (
     _extract_text_content,
     _extract_usage_tokens,
     _merge_meta,
+    _locked_connection,
     _migrate_legacy_prompt_skills,
     _migrate_090_095_family,
     _parse_postgres_major_version,
 )
+from open_webui import runtime_migrations
+
+
+def test_sqlite_migration_lock_works_on_current_platform(monkeypatch, tmp_path):
+    database_path = tmp_path / "runtime.db"
+    monkeypatch.setattr(
+        runtime_migrations, "DATABASE_URL", f"sqlite:///{database_path.as_posix()}"
+    )
+
+    with _locked_connection() as (_engine, connection, url):
+        assert url.database
+        connection.execute(sa.text("SELECT 1"))
+
+    assert database_path.with_suffix(".db.halo-migration.lock").exists()
 
 
 def test_extract_oauth_sub_prefers_oidc():

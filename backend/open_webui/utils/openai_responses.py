@@ -8,6 +8,106 @@ log = logging.getLogger(__name__)
 
 RESPONSES_COMPATIBILITY_MODES = {"standard", "sub2api", "custom"}
 SUB2API_DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+RESPONSES_TRANSPORT_DONE_EVENT = "__halo_responses_transport_done__"
+
+
+class ResponsesCompatibilityError(ValueError):
+    pass
+
+
+class ResponsesProtocolError(RuntimeError):
+    def __init__(self, error: dict[str, Any]):
+        self.error = error
+        super().__init__(str(error.get("message") or "Responses API request failed."))
+
+
+def _responses_error(
+    message: Any,
+    *,
+    code: Any = None,
+) -> dict[str, str]:
+    return {
+        "message": str(message or "Responses API request failed."),
+        "type": "responses_api_error",
+        "code": str(code or "upstream_error"),
+    }
+
+
+def normalize_responses_error(value: Any) -> Optional[dict[str, str]]:
+    """Normalize Responses JSON and event-stream failures."""
+    if not isinstance(value, dict):
+        return None
+
+    event_type = str(value.get("type") or "").strip().lower()
+    response = value.get("response")
+    response_obj = response if isinstance(response, dict) else {}
+
+    error = value.get("error")
+    if event_type == "response.failed" and not error:
+        error = response_obj.get("error")
+
+    status = str(
+        response_obj.get("status")
+        if response_obj
+        else value.get("status") or ""
+    ).strip().lower()
+    if event_type in {"response.completed", "response.done"} and status in {
+        "failed",
+        "incomplete",
+        "cancelled",
+        "queued",
+        "in_progress",
+    }:
+        error = response_obj.get("error") or value.get("error")
+
+    if isinstance(error, dict):
+        return _responses_error(
+            error.get("message") or error.get("detail") or value.get("message"),
+            code=error.get("code") or value.get("code"),
+        )
+    if isinstance(error, str) and error.strip():
+        return _responses_error(error, code=value.get("code"))
+
+    if event_type in {"error", "response.failed"}:
+        return _responses_error(
+            value.get("message") or response_obj.get("message"),
+            code=value.get("code") or response_obj.get("code"),
+        )
+
+    if status == "failed":
+        return _responses_error(
+            response_obj.get("message") or value.get("message"),
+            code=response_obj.get("code") or value.get("code"),
+        )
+    if status == "incomplete":
+        details = response_obj.get("incomplete_details") or value.get(
+            "incomplete_details"
+        )
+        reason = details.get("reason") if isinstance(details, dict) else details
+        return _responses_error(
+            reason or "The upstream response was incomplete.",
+            code="response_incomplete",
+        )
+    if status == "cancelled":
+        return _responses_error(
+            "The upstream response was cancelled.", code="response_cancelled"
+        )
+    if status in {"queued", "in_progress"}:
+        return _responses_error(
+            "The upstream returned a response that was not completed.",
+            code="response_not_completed",
+        )
+    return None
+
+
+def _raise_for_responses_failure(value: Any) -> None:
+    error = normalize_responses_error(value)
+    if error:
+        raise ResponsesProtocolError(error)
+
+
+def validate_responses_response(value: Any) -> None:
+    _raise_for_responses_failure(value)
 
 
 def normalize_url_citation(annotation: Any) -> Optional[dict]:
@@ -120,7 +220,10 @@ def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[s
     config = api_config if isinstance(api_config, dict) else {}
     mode = str(config.get("responses_compatibility") or "standard").strip().lower()
     if mode not in RESPONSES_COMPATIBILITY_MODES:
-        mode = "standard"
+        allowed = ", ".join(sorted(RESPONSES_COMPATIBILITY_MODES))
+        raise ResponsesCompatibilityError(
+            f"Invalid Responses compatibility mode {mode!r}; expected one of: {allowed}."
+        )
 
     default_instructions = config.get("responses_default_instructions")
     if not isinstance(default_instructions, str):
@@ -152,7 +255,7 @@ def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[s
             if isinstance(configured_tool_type, str) and configured_tool_type.strip():
                 native_web_search_tool_type = configured_tool_type.strip()
         if not native_web_search_tool_type:
-            native_web_search_tool_type = "web_search_preview"
+            native_web_search_tool_type = "web_search"
     else:
         omit_max_output_tokens = False
         native_web_search_tool_type = ""
@@ -171,7 +274,7 @@ def resolve_responses_compatibility(api_config: Optional[dict] = None) -> dict[s
                     "",
                 )
         if not native_web_search_tool_type:
-            native_web_search_tool_type = "web_search_preview"
+            native_web_search_tool_type = "web_search"
 
     return {
         "mode": mode,
@@ -482,7 +585,11 @@ def convert_chat_completions_to_responses_payload(
     responses_payload: Dict[str, Any] = {}
     compatibility_mode = str(responses_compatibility or "standard").strip().lower()
     if compatibility_mode not in RESPONSES_COMPATIBILITY_MODES:
-        compatibility_mode = "standard"
+        allowed = ", ".join(sorted(RESPONSES_COMPATIBILITY_MODES))
+        raise ResponsesCompatibilityError(
+            "Invalid Responses compatibility mode "
+            f"{compatibility_mode!r}; expected one of: {allowed}."
+        )
     default_instructions = (
         responses_default_instructions.strip()
         if isinstance(responses_default_instructions, str)
@@ -710,6 +817,7 @@ def convert_chat_completions_to_responses_payload(
 
 
 def convert_responses_to_chat_completions(responses_data: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    _raise_for_responses_failure(responses_data)
     output = responses_data.get("output", []) or []
     content = ""
     reasoning_content = ""
@@ -834,6 +942,7 @@ async def iter_responses_events(
                         continue
                     data = "\n".join(data_lines).strip()
                     if data == "[DONE]":
+                        yield {"type": RESPONSES_TRANSPORT_DONE_EVENT}
                         return
                     event = _try_json_loads(data)
                     if event is not None:
@@ -849,6 +958,7 @@ async def iter_responses_events(
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
+                    yield {"type": RESPONSES_TRANSPORT_DONE_EVENT}
                     return
                 event = _try_json_loads(data)
                 if event is not None:
@@ -861,6 +971,9 @@ async def iter_responses_events(
             line = line.strip()
             if not line:
                 continue
+            if line == "[DONE]" or line == "data: [DONE]":
+                yield {"type": RESPONSES_TRANSPORT_DONE_EVENT}
+                return
             event = _try_json_loads(line)
             if event is not None:
                 yield event
@@ -870,33 +983,233 @@ async def iter_responses_events(
     if trailing:
         if mode == "sse" and trailing.startswith("data:"):
             trailing = trailing[5:].strip()
-        if trailing != "[DONE]":
-            event = _try_json_loads(trailing)
-            if event is not None:
-                yield event
+        if trailing == "[DONE]":
+            yield {"type": RESPONSES_TRANSPORT_DONE_EVENT}
+            return
+        event = _try_json_loads(trailing)
+        if event is not None:
+            yield event
 
 
-async def collect_responses_response(events: AsyncIterator[dict]) -> Optional[dict]:
-    """Extract the final response object from a Responses SSE event stream."""
-    completed_response: Optional[dict] = None
+class _ResponsesEventAccumulator:
+    def __init__(self) -> None:
+        self.response: Optional[dict] = None
+        self.response_id: Optional[str] = None
+        self.model: Optional[str] = None
+        self.usage: dict = {}
+        self.text_parts: list[str] = []
+        self.reasoning_parts: list[str] = []
+        self.reasoning_delta_keys: set[str] = set()
+        self.annotations: list[dict] = []
+        self.annotation_urls: set[str] = set()
+        self.output_items: list[dict] = []
+        self.tool_states: dict[str, dict[str, str]] = {}
+        self.completed = False
 
-    async for event in events:
-        if not isinstance(event, dict):
-            continue
-        if event.get("type") not in ("response.completed", "response.done"):
-            continue
+    def consume(self, event: dict) -> None:
+        _raise_for_responses_failure(event)
+        event_type = str(event.get("type") or "")
+
+        if event_type == RESPONSES_TRANSPORT_DONE_EVENT:
+            self.completed = True
+            return
 
         response = event.get("response")
         if isinstance(response, dict):
-            completed_response = response
-        elif isinstance(event.get("output"), list):
-            completed_response = {
-                key: event[key]
-                for key in ("id", "model", "output", "usage", "status", "output_text")
-                if key in event
-            }
+            self.response_id = response.get("id") or self.response_id
+            self.model = response.get("model") or self.model
+            if isinstance(response.get("usage"), dict):
+                self.usage = response["usage"]
 
-    return completed_response
+        self.response_id = event.get("response_id") or event.get("id") or self.response_id
+        self.model = event.get("model") or self.model
+        if isinstance(event.get("usage"), dict):
+            self.usage = event["usage"]
+
+        def add_annotations(value: Any) -> None:
+            for citation in normalize_url_citations(value):
+                url = citation["url"]
+                if url in self.annotation_urls:
+                    continue
+                self.annotation_urls.add(url)
+                self.annotations.append(url_citation_to_chat_annotation(citation))
+
+        if event_type == "response.output_text.delta":
+            delta = event.get("delta")
+            if isinstance(delta, dict):
+                add_annotations(delta.get("annotations"))
+                delta = delta.get("text") or delta.get("content")
+            if isinstance(delta, str) and delta:
+                self.text_parts.append(delta)
+        elif event_type == "response.output_text.annotation.added":
+            add_annotations(event.get("annotation"))
+        elif event_type == "response.output_text.done" and not self.text_parts:
+            text = event.get("text")
+            if isinstance(text, str) and text:
+                self.text_parts.append(text)
+        elif event_type == "response.output_item.done":
+            item = event.get("item")
+            if isinstance(item, dict):
+                self.output_items.append(item)
+        elif event_type == "response.function_call_arguments.delta":
+            key = str(event.get("item_id") or event.get("call_id") or "function")
+            state = self.tool_states.setdefault(key, {"name": "", "arguments": ""})
+            delta = event.get("delta")
+            if delta is not None:
+                state["arguments"] += str(delta)
+        elif event_type == "response.function_call_arguments.done":
+            key = str(event.get("item_id") or event.get("call_id") or "function")
+            state = self.tool_states.setdefault(key, {"name": "", "arguments": ""})
+            state["name"] = str(event.get("name") or state["name"])
+            if not state["arguments"] and event.get("arguments") is not None:
+                state["arguments"] = _stringify_tool_call_args(event.get("arguments"))
+
+        if event_type.startswith(
+            (
+                "response.reasoning_summary",
+                "response.reasoning_text",
+                "response.reasoning.",
+            )
+        ):
+            family = (
+                "reasoning_summary"
+                if event_type.startswith("response.reasoning_summary")
+                else "reasoning_text"
+                if event_type.startswith("response.reasoning_text")
+                else "reasoning"
+            )
+            key_parts = [family]
+            for key in (
+                "item_id",
+                "id",
+                "call_id",
+                "output_index",
+                "summary_index",
+                "content_index",
+                "index",
+            ):
+                value = event.get(key)
+                if value is not None:
+                    key_parts.append(f"{key}:{value}")
+            reasoning_key = "|".join(key_parts)
+            if event_type.endswith(".delta"):
+                self.reasoning_delta_keys.add(reasoning_key)
+            elif reasoning_key in self.reasoning_delta_keys:
+                return
+            for key in (
+                "delta",
+                "text",
+                "part",
+                "summary",
+                "content",
+                "item",
+                "reasoning",
+            ):
+                text = _stringify_reasoning_content(event.get(key))
+                if text:
+                    self.reasoning_parts.append(text)
+                    break
+
+        if event_type in {"response.completed", "response.done"}:
+            if isinstance(response, dict):
+                self.response = response
+            elif isinstance(event.get("output"), list):
+                self.response = {
+                    key: event[key]
+                    for key in (
+                        "id",
+                        "model",
+                        "output",
+                        "usage",
+                        "status",
+                        "output_text",
+                    )
+                    if key in event
+                }
+            self.completed = True
+
+    def build_response(self) -> dict:
+        response = dict(self.response) if isinstance(self.response, dict) else {}
+        base_output = response.get("output")
+        output = list(base_output) if isinstance(base_output, list) else []
+        if not output:
+            output = list(self.output_items)
+        if self.text_parts and not any(item.get("type") == "message" for item in output):
+            output.append(
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "".join(self.text_parts)}
+                    ],
+                }
+            )
+        if self.reasoning_parts and not any(
+            item.get("type") == "reasoning" for item in output
+        ):
+            output.append(
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "".join(self.reasoning_parts),
+                        }
+                    ],
+                }
+            )
+        existing_call_ids = {
+            str(item.get("call_id") or item.get("id") or "")
+            for item in output
+            if item.get("type") in {"function_call", "tool_call"}
+        }
+        for call_id, state in self.tool_states.items():
+            if call_id in existing_call_ids:
+                continue
+            output.append(
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": state.get("name") or "",
+                    "arguments": state.get("arguments") or "",
+                }
+            )
+        response.setdefault("id", self.response_id or f"resp_{uuid.uuid4().hex}")
+        response.setdefault("model", self.model or "")
+        response.setdefault("status", "completed")
+        response["output"] = output
+        if self.usage and not isinstance(response.get("usage"), dict):
+            response["usage"] = self.usage
+        else:
+            response.setdefault("usage", self.usage)
+        if self.annotations and not response.get("annotations"):
+            response["annotations"] = list(self.annotations)
+        return response
+
+
+async def collect_responses_response(events: AsyncIterator[dict]) -> dict:
+    """Collect a terminal Responses event stream or raise on premature EOF."""
+    accumulator = _ResponsesEventAccumulator()
+    try:
+        async for event in events:
+            if not isinstance(event, dict):
+                continue
+            accumulator.consume(event)
+            if accumulator.completed:
+                return accumulator.build_response()
+    except ResponsesProtocolError:
+        raise
+    except Exception as exc:
+        raise ResponsesProtocolError(
+            _responses_error(str(exc), code="upstream_stream_interrupted")
+        ) from exc
+
+    raise ResponsesProtocolError(
+        _responses_error(
+            "Upstream Responses stream ended before a terminal event.",
+            code="upstream_stream_incomplete",
+        )
+    )
 
 
 async def collect_responses_response_from_text(
@@ -1075,19 +1388,33 @@ async def responses_events_to_chat_completions_sse(
                 return text
         return ""
 
-    async for event in events:
+    event_iterator = events.__aiter__()
+    while True:
+        try:
+            event = await event_iterator.__anext__()
+        except StopAsyncIteration:
+            break
+        except Exception as exc:
+            error = _responses_error(
+                str(exc), code="upstream_stream_interrupted"
+            )
+            yield f"data: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
         if not isinstance(event, dict):
             continue
 
-        # Some proxies wrap errors without a top-level "type".
-        if "error" in event and isinstance(event.get("error"), (dict, str)):
-            err = event.get("error")
-            msg = err.get("message") if isinstance(err, dict) else str(err)
-            yield f"data: {json.dumps({'error': {'message': msg, 'type': 'responses_api_error', 'code': 'upstream_error'}}, ensure_ascii=False)}\n\n"
+        error = normalize_responses_error(event)
+        if error:
+            yield f"data: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
 
         event_type = event.get("type", "") or ""
+        if event_type == RESPONSES_TRANSPORT_DONE_EVENT:
+            event = {"type": "response.done", "response": {"status": "completed"}}
+            event_type = "response.done"
 
         # Temporary diagnostic: log every upstream event type
         if event_type and event_type not in ("response.output_text.delta",):
@@ -1304,12 +1631,52 @@ async def responses_events_to_chat_completions_sse(
                     yield f"data: {json.dumps(make_chunk(delta_annotations=final_annotations), ensure_ascii=False)}\n\n"
 
             completed_reasoning_texts: List[str] = []
+            completed_text_parts: List[str] = []
+            completed_tool_calls: List[dict] = []
             if isinstance(completed_response, dict):
                 resp_obj = completed_response
                 output_items = resp_obj.get("output", [])
                 if isinstance(output_items, list):
                     for oi_idx, oi in enumerate(output_items):
-                        if isinstance(oi, dict) and oi.get("type") == "reasoning":
+                        if not isinstance(oi, dict):
+                            continue
+                        if oi.get("type") == "message" and not saw_text_content:
+                            for part in oi.get("content", []) or []:
+                                if not isinstance(part, dict):
+                                    continue
+                                if part.get("type") in ("output_text", "text"):
+                                    text = part.get("text") or ""
+                                    if text:
+                                        completed_text_parts.append(text)
+                        elif oi.get("type") in ("tool_call", "function_call"):
+                            raw_call_id = _tool_call_id_from_item(oi)
+                            provided_index = _extract_provided_index(oi, event)
+                            idx = get_tool_index(raw_call_id, provided_index)
+                            call_id = _stable_tool_call_id(raw_call_id, idx)
+                            name = _tool_call_name_from_item(oi)
+                            args = _stringify_tool_call_args(
+                                _tool_call_args_from_item(oi)
+                            )
+                            st = _tool_state(call_id, idx)
+                            if name:
+                                st["name"] = name
+                            if args:
+                                st["args"] = args
+                            if call_id not in tool_call_emitted and st.get("name"):
+                                tool_call_emitted.add(call_id)
+                                saw_tool_calls = True
+                                completed_tool_calls.append(
+                                    {
+                                        "index": idx,
+                                        "id": call_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": st.get("name") or "",
+                                            "arguments": st.get("args") or "",
+                                        },
+                                    }
+                                )
+                        elif oi.get("type") == "reasoning":
                             reasoning_text = _stringify_reasoning_content(
                                 oi.get("summary") or oi.get("content") or oi
                             )
@@ -1323,6 +1690,13 @@ async def responses_events_to_chat_completions_sse(
                                 bool(oi.get("encrypted_content")),
                                 json.dumps(oi, ensure_ascii=False, default=str)[:3000],
                             )
+            if completed_text_parts and not saw_text_content:
+                saw_content = True
+                saw_text_content = True
+                yield f"data: {json.dumps(make_chunk(delta_content=''.join(completed_text_parts)), ensure_ascii=False)}\n\n"
+            if completed_tool_calls:
+                completed_tool_calls.sort(key=lambda item: int(item.get("index") or 0))
+                yield f"data: {json.dumps(make_chunk(tool_calls=completed_tool_calls), ensure_ascii=False)}\n\n"
             if completed_reasoning_texts and not saw_reasoning_content:
                 reasoning_text = "\n".join(part for part in completed_reasoning_texts if part)
                 if reasoning_text:
@@ -1365,12 +1739,16 @@ async def responses_events_to_chat_completions_sse(
                 saw_tool_calls = True
                 yield f"data: {json.dumps(make_chunk(tool_calls=pending_tool_calls), ensure_ascii=False)}\n\n"
 
-            finish_reason = "tool_calls" if saw_tool_calls and not saw_text_content else "stop"
+            finish_reason = "tool_calls" if saw_tool_calls else "stop"
             yield f"data: {json.dumps(make_chunk(finish_reason=finish_reason, usage=usage), ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
 
         # Unknown event types: ignore (compat).
 
-    # If upstream ends without a done event, close the stream.
+    error = _responses_error(
+        "Upstream Responses stream ended before a terminal event.",
+        code="upstream_stream_incomplete",
+    )
+    yield f"data: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"

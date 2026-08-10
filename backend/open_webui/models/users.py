@@ -393,46 +393,62 @@ class UsersTable:
         except Exception:
             return None
 
-    def delete_user_by_id(self, id: str) -> bool:
+    def cleanup_user_resources_by_id(self, id: str) -> list[dict[str, str]]:
+        """Delete user-owned database resources and report every failure."""
+        from open_webui.models.files import Files
+        from open_webui.models.prompts import Prompts
+        from open_webui.models.tools import Tools
+        from open_webui.models.functions import Functions
+        from open_webui.models.knowledge import Knowledges
+        from open_webui.models.skills import Skills
+        from open_webui.models.memories import Memories
+        from open_webui.models.messages import Messages
+        from open_webui.models.notes import Notes
+        from open_webui.models.channels import Channels
+        from open_webui.models.folders import Folders
+        from open_webui.models.tags import Tags
+
+        operations = [
+            ("groups", lambda: Groups.remove_user_from_all_groups(id)),
+            ("chats", lambda: Chats.delete_chats_by_user_id(id)),
+            ("files", lambda: Files.delete_files_by_user_id(id)),
+            ("prompts", lambda: Prompts.delete_prompts_by_user_id(id)),
+            ("tools", lambda: Tools.delete_tools_by_user_id(id)),
+            ("functions", lambda: Functions.delete_functions_by_user_id(id)),
+            ("knowledge", lambda: Knowledges.delete_knowledge_by_user_id(id)),
+            ("skills", lambda: Skills.delete_skills_by_user_id(id)),
+            ("memories", lambda: Memories.delete_memories_by_user_id(id)),
+            ("messages", lambda: Messages.delete_messages_by_user_id(id)),
+            ("notes", lambda: Notes.delete_notes_by_user_id(id)),
+            ("channels", lambda: Channels.delete_channels_by_user_id(id)),
+            ("folders", lambda: Folders.delete_folders_by_user_id(id)),
+            ("tags", lambda: Tags.delete_tags_by_user_id(id)),
+        ]
+        failures: list[dict[str, str]] = []
+        for resource_type, operation in operations:
+            try:
+                if operation() is False:
+                    failures.append(
+                        {"type": resource_type, "id": id, "error": "operation returned false"}
+                    )
+            except Exception as exc:
+                failures.append(
+                    {"type": resource_type, "id": id, "error": str(exc)}
+                )
+        return failures
+
+    def delete_user_record_by_id(self, id: str) -> bool:
         try:
-            # Lazy imports to avoid circular dependency
-            from open_webui.models.files import Files
-            from open_webui.models.prompts import Prompts
-            from open_webui.models.tools import Tools
-            from open_webui.models.functions import Functions
-            from open_webui.models.knowledge import Knowledges
-            from open_webui.models.memories import Memories
-            from open_webui.models.messages import Messages
-            from open_webui.models.notes import Notes
-            from open_webui.models.channels import Channels
-            from open_webui.models.folders import Folders
-            from open_webui.models.tags import Tags
-
-            # Remove User from Groups
-            Groups.remove_user_from_all_groups(id)
-
-            # Delete all user resources
-            Chats.delete_chats_by_user_id(id)
-            Files.delete_files_by_user_id(id)
-            Prompts.delete_prompts_by_user_id(id)
-            Tools.delete_tools_by_user_id(id)
-            Functions.delete_functions_by_user_id(id)
-            Knowledges.delete_knowledge_by_user_id(id)
-            Memories.delete_memories_by_user_id(id)
-            Messages.delete_messages_by_user_id(id)
-            Notes.delete_notes_by_user_id(id)
-            Channels.delete_channels_by_user_id(id)
-            Folders.delete_folders_by_user_id(id)
-            Tags.delete_tags_by_user_id(id)
-
             with get_db() as db:
-                # Delete User
                 db.query(User).filter_by(id=id).delete()
                 db.commit()
-
             return True
         except Exception:
             return False
+
+    def delete_user_by_id(self, id: str) -> bool:
+        failures = self.cleanup_user_resources_by_id(id)
+        return not failures and self.delete_user_record_by_id(id)
 
     def update_user_api_key_by_id(self, id: str, api_key: str) -> str:
         try:

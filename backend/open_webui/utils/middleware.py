@@ -182,7 +182,11 @@ from open_webui.utils.code_interpreter import (
     execute_code_jupyter,
 )
 
-from open_webui.tasks import create_task, set_current_task_blocks_completion
+from open_webui.tasks import (
+    create_task,
+    set_current_task_blocks_completion,
+    set_task_message_id,
+)
 
 from open_webui.config import (
     CACHE_DIR,
@@ -4565,6 +4569,7 @@ async def chat_image_generation_handler(
             image_generation_task(),
             id=__metadata__["chat_id"],
         )
+        set_task_message_id(task_id, __metadata__.get("message_id"))
         try:
             Chats.upsert_message_to_chat_by_id_and_message_id(
                 __metadata__["chat_id"],
@@ -10178,6 +10183,7 @@ async def process_chat_response(
         task_id, _ = create_task(
             post_response_handler(response, events), id=metadata["chat_id"]
         )
+        set_task_message_id(task_id, metadata.get("message_id"))
         return {"status": True, "task_id": task_id}
 
     else:

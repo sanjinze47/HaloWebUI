@@ -633,6 +633,26 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
 
+    async def _retry_knowledge_cleanup() -> None:
+        try:
+            from open_webui.routers.knowledge import retry_pending_knowledge_cleanups
+
+            await asyncio.to_thread(retry_pending_knowledge_cleanups)
+        except Exception as e:
+            log.warning("Pending knowledge cleanup retry failed: %s", e)
+
+    asyncio.create_task(_retry_knowledge_cleanup())
+
+    async def _retry_file_cleanup() -> None:
+        try:
+            from open_webui.utils.file_cleanup import retry_pending_file_cleanups
+
+            await asyncio.to_thread(retry_pending_file_cleanups)
+        except Exception as e:
+            log.warning("Pending file cleanup retry failed: %s", e)
+
+    asyncio.create_task(_retry_file_cleanup())
+
     # HaloClaw: start messaging gateway adapters
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 

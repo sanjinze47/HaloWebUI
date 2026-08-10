@@ -16,6 +16,7 @@ from open_webui.routers.retrieval import (
     ProcessFileForm,
     process_files_batch,
     BatchProcessFilesForm,
+    restore_vector_snapshot,
 )
 from open_webui.storage.provider import Storage
 
@@ -308,17 +309,10 @@ async def reindex_knowledge_files(request: Request, user=Depends(get_verified_us
     for knowledge_base in knowledge_bases:
         try:
             files = Files.get_files_by_ids(knowledge_base.data.get("file_ids", []))
-
-            try:
-                if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge_base.id):
-                    VECTOR_DB_CLIENT.delete_collection(
-                        collection_name=knowledge_base.id
-                    )
-            except Exception as e:
-                log.error(f"Error deleting collection {knowledge_base.id}: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Error deleting vector DB collection",
+            vector_snapshot = None
+            if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge_base.id):
+                vector_snapshot = VECTOR_DB_CLIENT.get(
+                    collection_name=knowledge_base.id
                 )
 
             failed_files = []
@@ -327,7 +321,9 @@ async def reindex_knowledge_files(request: Request, user=Depends(get_verified_us
                     process_file(
                         request,
                         ProcessFileForm(
-                            file_id=file.id, collection_name=knowledge_base.id
+                            file_id=file.id,
+                            collection_name=knowledge_base.id,
+                            overwrite=True,
                         ),
                         user=user,
                     )
@@ -351,6 +347,28 @@ async def reindex_knowledge_files(request: Request, user=Depends(get_verified_us
             )
             for failed in failed_files:
                 log.warning(f"File ID: {failed['file_id']}, Error: {failed['error']}")
+            try:
+                restore_vector_snapshot(
+                    request,
+                    knowledge_base.id,
+                    vector_snapshot,
+                    user=user,
+                )
+            except Exception as rollback_error:
+                log.exception(
+                    "Failed to restore knowledge snapshot for %s",
+                    knowledge_base.id,
+                )
+                failed_files.append(
+                    {"file_id": None, "error": f"rollback failed: {rollback_error}"}
+                )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "knowledge_reindex_failed",
+                    "failed_files": failed_files,
+                },
+            )
 
     log.info("Reindexing completed successfully")
     return True
@@ -570,11 +588,6 @@ def update_file_from_knowledge_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # Remove content from the vector database
-    VECTOR_DB_CLIENT.delete(
-        collection_name=knowledge.id, filter={"file_id": form_data.file_id}
-    )
-
     # Add content to the vector database
     try:
         process_file(
@@ -582,6 +595,7 @@ def update_file_from_knowledge_by_id(
             ProcessFileForm(
                 file_id=form_data.file_id,
                 collection_name=id,
+                overwrite=True,
                 processing_mode=FILE_PROCESSING_MODE_RETRIEVAL,
             ),
             user=user,
@@ -648,55 +662,46 @@ def remove_file_from_knowledge_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # Remove content from the vector database
+    data = dict(knowledge.data or {})
+    file_ids = list(data.get("file_ids", []))
+    if form_data.file_id not in file_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT("file_id"),
+        )
+
+    # This endpoint only unlinks the file from this knowledge base. The
+    # standalone file record, blob and file collection remain reusable.
     try:
         VECTOR_DB_CLIENT.delete(
             collection_name=knowledge.id, filter={"file_id": form_data.file_id}
         )
     except Exception as e:
-        log.debug("This was most likely caused by bypassing embedding processing")
-        log.debug(e)
-        pass
-
-    try:
-        # Remove the file's collection from vector database
-        file_collection = f"file-{form_data.file_id}"
-        if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-            VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-    except Exception as e:
-        log.debug("This was most likely caused by bypassing embedding processing")
-        log.debug(e)
-        pass
-
-    # Delete file from database
-    Files.delete_file_by_id(form_data.file_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "knowledge_file_unlink_pending",
+                "message": "Knowledge vector cleanup failed and can be retried.",
+            },
+        ) from e
 
     if knowledge:
-        data = knowledge.data or {}
-        file_ids = data.get("file_ids", [])
+        file_ids.remove(form_data.file_id)
+        data["file_ids"] = file_ids
 
-        if form_data.file_id in file_ids:
-            file_ids.remove(form_data.file_id)
-            data["file_ids"] = file_ids
+        knowledge = Knowledges.update_knowledge_data_by_id(id=id, data=data)
 
-            knowledge = Knowledges.update_knowledge_data_by_id(id=id, data=data)
+        if knowledge:
+            files = Files.get_files_by_ids(file_ids)
 
-            if knowledge:
-                files = Files.get_files_by_ids(file_ids)
-
-                return KnowledgeFilesResponse(
-                    **knowledge.model_dump(),
-                    files=files,
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("knowledge"),
-                )
+            return KnowledgeFilesResponse(
+                **knowledge.model_dump(),
+                files=files,
+            )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("file_id"),
+                detail=ERROR_MESSAGES.DEFAULT("knowledge"),
             )
     else:
         raise HTTPException(
@@ -708,6 +713,115 @@ def remove_file_from_knowledge_by_id(
 ############################
 # DeleteKnowledgeById
 ############################
+
+
+def _cleanup_state(knowledge, operation: str, error: Optional[str] = None) -> dict:
+    meta = dict(knowledge.meta or {})
+    previous = dict(meta.get("vector_cleanup") or {})
+    now = int(time.time())
+    cleanup = {
+        "operation": operation,
+        "status": "pending",
+        "attempts": int(previous.get("attempts") or 0) + 1,
+        "requested_at": int(previous.get("requested_at") or now),
+        "last_attempt_at": now,
+        "last_error": error,
+    }
+    meta["vector_cleanup"] = cleanup
+    return meta
+
+
+def _delete_knowledge_vectors_or_mark_pending(knowledge, operation: str):
+    meta = _cleanup_state(knowledge, operation)
+    if not Knowledges.update_knowledge_meta_by_id(knowledge.id, meta):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "knowledge_cleanup_state_failed",
+                "message": "Unable to persist knowledge cleanup state.",
+            },
+        )
+    try:
+        if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge.id):
+            VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
+    except Exception as exc:
+        current = Knowledges.get_knowledge_by_id(knowledge.id) or knowledge
+        meta = _cleanup_state(current, operation, str(exc))
+        Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "knowledge_cleanup_pending",
+                "message": "Knowledge vector cleanup failed and can be retried.",
+            },
+        ) from exc
+
+    # Keep the durable marker until the caller commits the matching metadata
+    # operation. A process exit after vector deletion must remain recoverable.
+    return Knowledges.get_knowledge_by_id(knowledge.id) or knowledge
+
+
+def _remove_knowledge_model_references(knowledge_id: str) -> None:
+    for model in Models.get_all_models():
+        if not model.meta or not hasattr(model.meta, "knowledge"):
+            continue
+        knowledge_list = model.meta.knowledge or []
+        updated_knowledge = [
+            item for item in knowledge_list if item.get("id") != knowledge_id
+        ]
+        if len(updated_knowledge) == len(knowledge_list):
+            continue
+        model.meta.knowledge = updated_knowledge
+        updated = Models.update_model_by_id(
+            model.id,
+            ModelForm(
+                id=model.id,
+                name=model.name,
+                base_model_id=model.base_model_id,
+                meta=model.meta,
+                params=model.params,
+                access_control=model.access_control,
+                is_active=model.is_active,
+            ),
+        )
+        if not updated:
+            raise RuntimeError(
+                f"Unable to remove knowledge {knowledge_id} from model {model.id}."
+            )
+
+
+def retry_pending_knowledge_cleanups() -> None:
+    """Best-effort startup retry for durable vector cleanup records."""
+    for knowledge in Knowledges.get_knowledge_bases():
+        cleanup = dict((knowledge.meta or {}).get("vector_cleanup") or {})
+        if cleanup.get("status") != "pending":
+            continue
+        operation = cleanup.get("operation")
+        if operation not in {"delete", "reset"}:
+            continue
+        try:
+            if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge.id):
+                VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge.id)
+            if operation == "delete":
+                _remove_knowledge_model_references(knowledge.id)
+                if not Knowledges.delete_knowledge_by_id(knowledge.id):
+                    raise RuntimeError("Unable to delete knowledge metadata.")
+                continue
+            if not Knowledges.update_knowledge_data_by_id(
+                id=knowledge.id, data={"file_ids": []}
+            ):
+                raise RuntimeError("Unable to reset knowledge metadata.")
+            meta = dict(knowledge.meta or {})
+            meta.pop("vector_cleanup", None)
+            if not Knowledges.update_knowledge_meta_by_id(knowledge.id, meta):
+                raise RuntimeError("Unable to clear knowledge cleanup state.")
+        except Exception as exc:
+            log.warning(
+                "Knowledge cleanup retry failed for %s: %s", knowledge.id, exc
+            )
+            Knowledges.update_knowledge_meta_by_id(
+                knowledge.id, _cleanup_state(knowledge, operation, str(exc))
+            )
 
 
 @router.delete("/{id}/delete", response_model=bool)
@@ -727,40 +841,30 @@ async def delete_knowledge_by_id(id: str, user=Depends(get_verified_user)):
 
     log.info(f"Deleting knowledge base: {id} (name: {knowledge.name})")
 
-    # Get all models
-    models = Models.get_all_models()
-    log.info(f"Found {len(models)} models to check for knowledge base {id}")
-
-    # Update models that reference this knowledge base
-    for model in models:
-        if model.meta and hasattr(model.meta, "knowledge"):
-            knowledge_list = model.meta.knowledge or []
-            # Filter out the deleted knowledge base
-            updated_knowledge = [k for k in knowledge_list if k.get("id") != id]
-
-            # If the knowledge list changed, update the model
-            if len(updated_knowledge) != len(knowledge_list):
-                log.info(f"Updating model {model.id} to remove knowledge base {id}")
-                model.meta.knowledge = updated_knowledge
-                # Create a ModelForm for the update
-                model_form = ModelForm(
-                    id=model.id,
-                    name=model.name,
-                    base_model_id=model.base_model_id,
-                    meta=model.meta,
-                    params=model.params,
-                    access_control=model.access_control,
-                    is_active=model.is_active,
-                )
-                Models.update_model_by_id(model.id, model_form)
-
-    # Clean up vector DB
+    knowledge = _delete_knowledge_vectors_or_mark_pending(knowledge, "delete")
     try:
-        VECTOR_DB_CLIENT.delete_collection(collection_name=id)
-    except Exception as e:
-        log.debug(e)
-        pass
+        _remove_knowledge_model_references(id)
+    except Exception as exc:
+        Knowledges.update_knowledge_meta_by_id(
+            knowledge.id,
+            _cleanup_state(knowledge, "delete", str(exc)),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "knowledge_cleanup_pending"},
+        ) from exc
     result = Knowledges.delete_knowledge_by_id(id=id)
+    if not result:
+        Knowledges.update_knowledge_meta_by_id(
+            knowledge.id,
+            _cleanup_state(
+                knowledge, "delete", "Unable to delete knowledge metadata."
+            ),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "knowledge_cleanup_pending"},
+        )
     return result
 
 
@@ -784,13 +888,43 @@ async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    try:
-        VECTOR_DB_CLIENT.delete_collection(collection_name=id)
-    except Exception as e:
-        log.debug(e)
-        pass
+    knowledge = _delete_knowledge_vectors_or_mark_pending(knowledge, "reset")
 
     knowledge = Knowledges.update_knowledge_data_by_id(id=id, data={"file_ids": []})
+    if not knowledge:
+        current = Knowledges.get_knowledge_by_id(id)
+        if current:
+            Knowledges.update_knowledge_meta_by_id(
+                id,
+                _cleanup_state(
+                    current,
+                    "reset",
+                    "Unable to reset knowledge metadata.",
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "knowledge_cleanup_pending"},
+        )
+
+    meta = dict(knowledge.meta or {})
+    meta.pop("vector_cleanup", None)
+    knowledge = Knowledges.update_knowledge_meta_by_id(id, meta)
+    if not knowledge:
+        current = Knowledges.get_knowledge_by_id(id)
+        if current:
+            Knowledges.update_knowledge_meta_by_id(
+                id,
+                _cleanup_state(
+                    current,
+                    "reset",
+                    "Unable to clear knowledge cleanup state.",
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "knowledge_cleanup_pending"},
+        )
 
     return knowledge
 

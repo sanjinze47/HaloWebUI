@@ -105,6 +105,20 @@
 		resolveConfiguredDefaultWebSearchMode
 	} from '$lib/utils/native-web-search';
 	import { hasVisibleMessageFiles as messageHasVisibleFiles } from '$lib/utils/chat-message-errors';
+	import {
+		applyFailedResponseToHistory,
+		buildFailedResponseChatPayload
+	} from '$lib/utils/chat-response-failure';
+	import {
+		attachResponseTaskId,
+		beginResponseTask,
+		finishResponseTask,
+		getResponseTaskIds,
+		hasPendingResponses,
+		restoreResponseTasks,
+		shouldTrackResponseTaskForChat,
+		type ResponseTaskRegistry
+	} from '$lib/utils/chat-task-registry';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
 	import {
@@ -1021,10 +1035,39 @@
 		}
 	}
 
-	let taskIds = null;
+	let taskIds: string[] | null = null;
+	let responseTasks: ResponseTaskRegistry = {};
+	let legacyTaskIds: string[] = [];
 	let stoppedResponseMessageIds = new Set<string>();
 	let messageQueue: { id: string; prompt: string; files: any[]; referenceFiles?: any[] }[] = [];
+	let advancingMessageQueue = false;
 	let branchingMessageId: string | null = null;
+
+	const syncTaskIds = () => {
+		const ids = [...new Set([...getResponseTaskIds(responseTasks), ...legacyTaskIds])];
+		taskIds = ids.length > 0 ? ids : null;
+	};
+
+	const resetResponseTasks = () => {
+		responseTasks = {};
+		legacyTaskIds = [];
+		syncTaskIds();
+	};
+
+	const beginResponseTracking = (messageId: string) => {
+		responseTasks = beginResponseTask(responseTasks, messageId);
+		syncTaskIds();
+	};
+
+	const attachResponseTask = (messageId: string, taskId: string) => {
+		responseTasks = attachResponseTaskId(responseTasks, messageId, taskId);
+		syncTaskIds();
+	};
+
+	const finishResponseTracking = (messageId: string) => {
+		responseTasks = finishResponseTask(responseTasks, messageId);
+		syncTaskIds();
+	};
 
 	// Temporary instruction for regeneration with modifications (e.g. "more concise")
 	let _pendingInstruction: string | null = null;
@@ -3291,7 +3334,7 @@
 		if (fresh || !inheritNewChatState) {
 			chat = null;
 			tags = [];
-			taskIds = null;
+			resetResponseTasks();
 			processing = '';
 			atSelectedModel = undefined;
 			activeAssistant = null;
@@ -3492,10 +3535,11 @@
 		const navigationId = targetChatId;
 		chatId.set(targetChatId);
 		tags = [];
-		taskIds = null;
+		resetResponseTasks();
 		const chatContextPromise = getChatContextById(localStorage.token, targetChatId).catch(() => ({
 			tags: [],
-			task_ids: []
+			task_ids: [],
+			tasks: []
 		}));
 
 		chat = await getChatById(localStorage.token, targetChatId).catch(() => null);
@@ -3555,7 +3599,12 @@
 					if (navigationId !== chatIdProp) return;
 
 					tags = nextContext?.tags ?? [];
-					taskIds = nextContext?.task_ids ?? [];
+					responseTasks = restoreResponseTasks(nextContext?.tasks);
+					const mappedTaskIds = new Set(getResponseTaskIds(responseTasks));
+					legacyTaskIds = (nextContext?.task_ids ?? []).filter(
+						(taskId) => !mappedTaskIds.has(taskId)
+					);
+					syncTaskIds();
 					reconcileLoadedAssistantMessages(taskIds);
 				})();
 
@@ -3568,10 +3617,19 @@
 	};
 
 	const reconcileLoadedAssistantMessages = (activeTaskIds: string[] | null) => {
-		const hasPendingTask = Array.isArray(activeTaskIds) && activeTaskIds.length > 0;
+		const mappedPendingAssistantIds = new Set(Object.keys(responseTasks));
+		const hasPendingTask =
+			mappedPendingAssistantIds.size > 0 ||
+			(Array.isArray(activeTaskIds) && activeTaskIds.length > 0);
 		const pendingAssistantIds = new Set<string>();
 
-		if (hasPendingTask) {
+		if (mappedPendingAssistantIds.size > 0) {
+			for (const messageId of mappedPendingAssistantIds) {
+				if (history.messages[messageId]?.role === 'assistant') {
+					pendingAssistantIds.add(messageId);
+				}
+			}
+		} else if (hasPendingTask) {
 			for (const [messageId, message] of Object.entries(history.messages)) {
 				if (message?.role === 'assistant' && message.done === false && !isResponseStopped(message)) {
 					pendingAssistantIds.add(messageId);
@@ -3622,7 +3680,7 @@
 		}
 
 		if (!hasActivePendingResponse) {
-			taskIds = null;
+			resetResponseTasks();
 		}
 
 		activeChatIds.update((ids) => {
@@ -3650,7 +3708,7 @@
 	};
 
 	const isStreamingResponseActive = () => {
-		if (Array.isArray(taskIds) && taskIds.length > 0) {
+		if (hasPendingResponses(responseTasks) || (Array.isArray(taskIds) && taskIds.length > 0)) {
 			return true;
 		}
 
@@ -3967,6 +4025,40 @@
 			}
 		});
 	};
+
+	const hasPendingSiblingResponseInHistory = (historyState: any, responseMessageId: string) => {
+		const parentId = historyState.messages[responseMessageId]?.parentId;
+		return Boolean(
+			parentId &&
+				(historyState.messages[parentId]?.childrenIds ?? []).some(
+					(id: string) => historyState.messages[id] && historyState.messages[id].done !== true
+				)
+		);
+	};
+	const hasPendingSiblingResponse = (responseMessageId: string) =>
+		hasPendingSiblingResponseInHistory(history, responseMessageId);
+
+	const submitNextQueuedMessageIfIdle = async (responseMessageId: string) => {
+		if (
+			advancingMessageQueue ||
+			hasPendingSiblingResponse(responseMessageId) ||
+			messageQueue.length === 0
+		) {
+			return;
+		}
+
+		advancingMessageQueue = true;
+		try {
+			const next = messageQueue[0];
+			messageQueue = messageQueue.slice(1);
+			files = next.files;
+			await tick();
+			await submitPrompt(next.prompt, { referenceFiles: next.referenceFiles ?? [] });
+		} finally {
+			advancingMessageQueue = false;
+		}
+	};
+
 	const chatCompletedHandler = async (chatId, modelId, responseMessageId, messages) => {
 		const responseMessage = history.messages[responseMessageId];
 		const responseModelIndex = getMessageModelIndex(responseMessage);
@@ -3983,6 +4075,7 @@
 					: $i18n.t('Model connection is unavailable. Please select the model again.')
 			};
 			await saveChatHandler(chatId, history);
+			await submitNextQueuedMessageIfIdle(responseMessageId);
 			return;
 		}
 		applyResolvedMessageModel(history.messages[responseMessageId], responseModelResolution);
@@ -4056,24 +4149,22 @@
 			}
 		}
 
-		taskIds = null;
-		await tick();
+		const hasPendingSibling = hasPendingSiblingResponse(responseMessageId);
 
-		const parentId = history.messages[responseMessageId]?.parentId;
-		const hasPendingSibling =
-			parentId &&
-			(history.messages[parentId]?.childrenIds ?? []).some(
-				(id) => history.messages[id] && history.messages[id].done !== true
-			);
-
-		if (!hasPendingSibling && messageQueue.length > 0) {
-			const next = messageQueue[0];
-			messageQueue = messageQueue.slice(1);
-
-			files = next.files;
-			await tick();
-			await submitPrompt(next.prompt, { referenceFiles: next.referenceFiles ?? [] });
+		if (!hasPendingSibling && legacyTaskIds.length > 0) {
+			legacyTaskIds = [];
+			syncTaskIds();
 		}
+
+		if (!hasPendingSibling && !hasPendingResponses(responseTasks)) {
+			activeChatIds.update((ids) => {
+				const next = new Set(ids);
+				next.delete(chatId);
+				return next;
+			});
+		}
+
+		await submitNextQueuedMessageIfIdle(responseMessageId);
 	};
 
 	const chatActionHandler = async (chatId, actionId, modelId, responseMessageId, event = null) => {
@@ -4627,6 +4718,7 @@
 			clearPendingGeminiImages(message.id, true);
 			message.done = true;
 			message.completedAt = Date.now() / 1000;
+			finishResponseTracking(message.id);
 			commitHistoryMessage(message);
 			await tick();
 
@@ -4664,8 +4756,15 @@
 				})
 			);
 			activeChatIds.update((ids) => {
-				ids.delete($chatId);
-				return new Set(ids);
+				const next = new Set(ids);
+				if (
+					!hasPendingResponses(responseTasks) &&
+					legacyTaskIds.length === 0 &&
+					!hasPendingSiblingResponse(message.id)
+				) {
+					next.delete($chatId);
+				}
+				return next;
 			});
 
 			await chatCompletedHandler(
@@ -4758,7 +4857,8 @@
 			return;
 		}
 
-		const hasPendingTask = Array.isArray(taskIds) && taskIds.length > 0;
+		const hasPendingTask =
+			hasPendingResponses(responseTasks) || (Array.isArray(taskIds) && taskIds.length > 0);
 		const hasRunningResponse = messages.length !== 0 && messages.at(-1).done != true;
 		if (hasPendingTask || hasRunningResponse) {
 			if ($settings?.enableMessageQueue ?? true) {
@@ -5160,6 +5260,11 @@
 	) => {
 		const responseMessage = _history.messages[responseMessageId];
 		const files = structuredClone(chatFiles);
+		const requestIsTemporary = $temporaryChatEnabled;
+		const requestChatPayload = requestIsTemporary
+			? null
+			: structuredClone(buildPersistedChatData(_history));
+		beginResponseTracking(responseMessageId);
 
 		resetAutoScrollLock();
 		scrollToBottom();
@@ -5370,7 +5475,7 @@
 				model_item: model,
 
 				session_id: $socket?.id,
-				chat_id: $chatId,
+				chat_id: _chatId,
 				id: responseMessageId,
 
 				...(!$temporaryChatEnabled &&
@@ -5423,18 +5528,24 @@
 					detail: resolutionDetail
 				};
 				responseMessage.done = true;
-				history.messages[responseMessageId] = responseMessage;
-				history.currentId = responseMessageId;
+				_history.messages[responseMessageId] = responseMessage;
 				return null;
 			}
 
-			await handleOpenAIError(error, responseMessage);
+			await handleOpenAIError(error, responseMessage, _history);
 			return null;
 		});
 
 		if (res) {
 			if (res.error) {
-				await handleOpenAIError(res.error, responseMessage);
+				await handleOpenAIError(res.error, responseMessage, _history);
+				await finalizeFailedResponse(
+					_chatId,
+					responseMessage,
+					_history,
+					requestChatPayload,
+					requestIsTemporary
+				);
 			} else if (stoppedResponseMessageIds.has(responseMessageId) || isResponseStopped(responseMessage)) {
 				if (res.task_id) {
 					await stopTask(localStorage.token, res.task_id).catch((error) => {
@@ -5442,13 +5553,35 @@
 						return null;
 					});
 				}
+				finishResponseTracking(responseMessageId);
 			} else {
-				if (res.task_id && taskIds) {
-					taskIds.push(res.task_id);
-				} else if (res.task_id) {
-					taskIds = [res.task_id];
+				if (res.task_id) {
+					if (shouldTrackResponseTaskForChat($chatId, _chatId)) {
+						attachResponseTask(responseMessageId, res.task_id);
+					}
+				} else {
+					await handleOpenAIError(
+						{ message: $i18n.t('The response did not start. Please try again.') },
+						responseMessage,
+						_history
+					);
+					await finalizeFailedResponse(
+						_chatId,
+						responseMessage,
+						_history,
+						requestChatPayload,
+						requestIsTemporary
+					);
 				}
 			}
+		} else {
+			await finalizeFailedResponse(
+				_chatId,
+				responseMessage,
+				_history,
+				requestChatPayload,
+				requestIsTemporary
+			);
 		}
 
 		await tick();
@@ -5754,7 +5887,7 @@
 		};
 	};
 
-	const handleOpenAIError = async (error, responseMessage) => {
+	const handleOpenAIError = async (error: any, responseMessage: any, targetHistory: any = history) => {
 		let innerError;
 
 		if (error) {
@@ -5781,7 +5914,7 @@
 				);
 			}
 
-			history.messages[responseMessage.id] = responseMessage;
+			targetHistory.messages[responseMessage.id] = responseMessage;
 			return;
 		}
 
@@ -5809,14 +5942,68 @@
 			);
 		}
 
-		history.messages[responseMessage.id] = responseMessage;
+		targetHistory.messages[responseMessage.id] = responseMessage;
+	};
+
+	const finalizeFailedResponse = async (
+		failedChatId: string,
+		responseMessage: any,
+		failedHistory: any,
+		requestChatPayload: any,
+		requestIsTemporary: boolean
+	) => {
+		if (!responseMessage.error) {
+			responseMessage.error = {
+				content: $i18n.t('The response did not start. Please try again.')
+			};
+		}
+		responseMessage.done = true;
+		responseMessage.completedAt = responseMessage.completedAt ?? Date.now() / 1000;
+		const failedHistoryState = applyFailedResponseToHistory(failedHistory, responseMessage);
+		finishResponseTracking(responseMessage.id);
+		const isCurrentChat = $chatId === failedChatId;
+		if (isCurrentChat) {
+			history = applyFailedResponseToHistory(history, responseMessage);
+		}
+
+		if (
+			!hasPendingSiblingResponseInHistory(failedHistoryState, responseMessage.id) &&
+			(!isCurrentChat ||
+				(!hasPendingResponses(responseTasks) && legacyTaskIds.length === 0))
+		) {
+			activeChatIds.update((ids) => {
+				const next = new Set(ids);
+				next.delete(failedChatId);
+				return next;
+			});
+		}
+
+		if (!requestIsTemporary && failedChatId && failedChatId !== 'local') {
+			if (isCurrentChat) {
+				await saveChatHandler(failedChatId, history);
+			} else if (requestChatPayload) {
+				await updateChatById(
+					localStorage.token,
+					failedChatId,
+					buildFailedResponseChatPayload(
+						requestChatPayload,
+						failedHistoryState,
+						responseMessage
+					)
+				);
+			}
+		}
+
+		if (isCurrentChat) {
+			await submitNextQueuedMessageIfIdle(responseMessage.id);
+		}
 	};
 
 	const stopResponse = async () => {
 		const currentTaskIds = Array.isArray(taskIds) ? [...taskIds] : [];
 
 		await markResponseMessagesStopped();
-		taskIds = null;
+		resetResponseTasks();
 
 		for (const taskId of currentTaskIds) {
 			if (taskId) {
@@ -6235,6 +6422,7 @@
 							<MessageInput
 								{history}
 								{taskIds}
+								hasPendingResponseTasks={hasPendingResponses(responseTasks)}
 								{selectedModels}
 								bind:files
 								bind:prompt

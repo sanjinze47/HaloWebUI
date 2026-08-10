@@ -109,6 +109,10 @@ class FileForm(BaseModel):
 
 
 class FilesTable:
+    @staticmethod
+    def _is_pending_deletion(file) -> bool:
+        return bool((file.meta or {}).get("deletion_pending"))
+
     def insert_new_file(self, user_id: str, form_data: FileForm) -> Optional[FileModel]:
         with get_db() as db:
             file = FileModel(
@@ -133,18 +137,26 @@ class FilesTable:
                 log.exception(f"Error inserting a new file: {e}")
                 return None
 
-    def get_file_by_id(self, id: str) -> Optional[FileModel]:
+    def get_file_by_id(
+        self, id: str, *, include_pending: bool = False
+    ) -> Optional[FileModel]:
         with get_db() as db:
             try:
                 file = db.get(File, id)
+                if not file or (not include_pending and self._is_pending_deletion(file)):
+                    return None
                 return FileModel.model_validate(file)
             except Exception:
                 return None
 
-    def get_file_metadata_by_id(self, id: str) -> Optional[FileMetadataResponse]:
+    def get_file_metadata_by_id(
+        self, id: str, *, include_pending: bool = False
+    ) -> Optional[FileMetadataResponse]:
         with get_db() as db:
             try:
                 file = db.get(File, id)
+                if not file or (not include_pending and self._is_pending_deletion(file)):
+                    return None
                 return FileMetadataResponse(
                     id=file.id,
                     meta=file.meta,
@@ -154,9 +166,13 @@ class FilesTable:
             except Exception:
                 return None
 
-    def get_files(self) -> list[FileModel]:
+    def get_files(self, *, include_pending: bool = False) -> list[FileModel]:
         with get_db() as db:
-            return [FileModel.model_validate(file) for file in db.query(File).all()]
+            return [
+                FileModel.model_validate(file)
+                for file in db.query(File).all()
+                if include_pending or not self._is_pending_deletion(file)
+            ]
 
     def get_files_by_ids(self, ids: list[str]) -> list[FileModel]:
         with get_db() as db:
@@ -166,6 +182,7 @@ class FilesTable:
                 .filter(File.id.in_(ids))
                 .order_by(File.updated_at.desc())
                 .all()
+                if not self._is_pending_deletion(file)
             ]
 
     def get_file_metadatas_by_ids(self, ids: list[str]) -> list[FileMetadataResponse]:
@@ -181,9 +198,12 @@ class FilesTable:
                 .filter(File.id.in_(ids))
                 .order_by(File.updated_at.desc())
                 .all()
+                if not self._is_pending_deletion(file)
             ]
 
-    def get_files_by_user_id(self, user_id: str) -> list[FileModel]:
+    def get_files_by_user_id(
+        self, user_id: str, *, include_pending: bool = False
+    ) -> list[FileModel]:
         with get_db() as db:
             return [
                 FileModel.model_validate(file)
@@ -191,6 +211,7 @@ class FilesTable:
                 .filter_by(user_id=user_id)
                 .order_by(File.created_at.desc(), File.id.desc())
                 .all()
+                if include_pending or not self._is_pending_deletion(file)
             ]
 
     def get_file_by_hash_and_user_id(
@@ -199,6 +220,8 @@ class FilesTable:
         with get_db() as db:
             try:
                 file = db.query(File).filter_by(user_id=user_id, hash=hash).first()
+                if file and self._is_pending_deletion(file):
+                    return None
                 return FileModel.model_validate(file) if file else None
             except Exception:
                 return None
@@ -235,6 +258,28 @@ class FilesTable:
                 db.commit()
                 return FileModel.model_validate(file)
             except Exception:
+                return None
+
+    def update_file_processing_by_id(
+        self, id: str, *, data: dict, hash: str, meta: dict
+    ) -> Optional[FileModel]:
+        """Commit content, hash and processing metadata as one database state."""
+        with get_db() as db:
+            try:
+                file = db.query(File).filter_by(id=id).first()
+                if not file:
+                    return None
+                file.data = {**(file.data or {}), **data}
+                file.hash = hash
+                file.meta = json.loads(
+                    json.dumps({**(file.meta or {}), **meta}, default=str)
+                )
+                file.updated_at = int(time.time())
+                db.commit()
+                db.refresh(file)
+                return FileModel.model_validate(file)
+            except Exception:
+                db.rollback()
                 return None
 
     def update_file_access_control_by_id(

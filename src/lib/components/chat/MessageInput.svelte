@@ -82,6 +82,8 @@
 	} from '$lib/utils/native-web-search';
 	import { translateWithDefault } from '$lib/i18n';
 	import { saveUserSettingsPatch } from '$lib/utils/user-settings';
+	import { removeAttachment, removeDeletedAttachment } from '$lib/utils/async-file-actions';
+	import { shouldShowResponseStopControl } from '$lib/utils/chat-task-registry';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -94,6 +96,7 @@
 	import { Image as ImageIcon } from 'lucide-svelte';
 
 	const i18n = getContext('i18n');
+	const pendingAttachmentDeletions = new Set<string | object>();
 
 	export let transparentBackground = false;
 
@@ -119,7 +122,8 @@
 			isDedicatedImageGenerationModel(selectedModelIds[0]));
 
 	export let history;
-	export let taskIds = null;
+	export let taskIds: string[] | null = null;
+	export let hasPendingResponseTasks = false;
 
 	export let prompt = '';
 	export let files: any[] = [];
@@ -902,17 +906,27 @@
 			return;
 		}
 
-		if (file.itemId && file.id && file.type !== 'collection' && !file?.collection) {
-			try {
-				await deleteFileById(localStorage.token, file.id);
-			} catch (error) {
-				console.error('Failed to delete uploaded file:', error);
+		try {
+			const removal = await removeAttachment({
+				item: file,
+				pending: pendingAttachmentDeletions,
+				deleteRemote: async (file) => {
+					if (file.itemId && file.id && file.type !== 'collection' && !file?.collection) {
+						const deleted = await deleteFileById(localStorage.token, file.id);
+						if (!deleted) {
+							throw new Error('File deletion did not complete.');
+						}
+					}
+				},
+				revokePreview: revokePreviewUrl
+			});
+			if (removal) {
+				files = removeDeletedAttachment(files, removal);
 			}
+		} catch (error) {
+			console.error('Failed to delete uploaded file:', error);
+			toast.error($i18n.t('Failed to delete file. Please try again.'));
 		}
-
-		revokePreviewUrl(file?.preview_url);
-		files.splice(fileIdx, 1);
-		files = files;
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
@@ -1314,16 +1328,7 @@
 													dismissible={true}
 													edit={true}
 													on:dismiss={async () => {
-														if (file.itemId && file.type !== 'collection' && !file?.collection) {
-															if (file.id) {
-																// This will handle both file deletion and Chroma cleanup
-																await deleteFileById(localStorage.token, file.id);
-															}
-														}
-
-														// Remove from UI state
-														files.splice(fileIdx, 1);
-														files = files;
+														await removeInputFile(fileIdx);
 													}}
 													on:click={() => {
 														console.log(file);
@@ -2008,7 +2013,7 @@
 											</Tooltip>
 										{/if}
 
-										{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true)}
+										{#if shouldShowResponseStopControl({ taskIds, hasPendingResponseTasks, currentMessageDone: history.currentId ? history.messages[history.currentId]?.done : true })}
 											<div class=" flex items-center">
 												<Tooltip content={$i18n.t('Stop')}>
 													<button

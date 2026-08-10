@@ -134,6 +134,7 @@ class ChromaClient:
                 result = collection.get(
                     where=filter,
                     limit=limit,
+                    include=["documents", "metadatas", "embeddings"],
                 )
 
                 return GetResult(
@@ -141,22 +142,26 @@ class ChromaClient:
                         "ids": [result["ids"]],
                         "documents": [result["documents"]],
                         "metadatas": [result["metadatas"]],
+                        "embeddings": [result["embeddings"]],
                     }
                 )
             return None
-        except:
-            return None
+        except Exception as e:
+            if self._is_missing_collection_error(e):
+                return None
+            raise
 
     def get(self, collection_name: str) -> Optional[GetResult]:
         # Get all the items in the collection.
         collection = self.client.get_collection(name=collection_name)
         if collection:
-            result = collection.get()
+            result = collection.get(include=["documents", "metadatas", "embeddings"])
             return GetResult(
                 **{
                     "ids": [result["ids"]],
                     "documents": [result["documents"]],
                     "metadatas": [result["metadatas"]],
+                    "embeddings": [result["embeddings"]],
                 }
             )
         return None
@@ -211,11 +216,13 @@ class ChromaClient:
                 elif filter:
                     collection.delete(where=filter)
         except Exception as e:
-            # If collection doesn't exist, that's fine - nothing to delete
-            log.debug(
-                f"Attempted to delete from non-existent collection {collection_name}. Ignoring."
-            )
-            pass
+            if self._is_missing_collection_error(e):
+                log.debug(
+                    "Attempted to delete from non-existent collection %s. Ignoring.",
+                    collection_name,
+                )
+                return
+            raise
 
     def reset(self):
         # Resets the database. This will delete all collections and item entries.

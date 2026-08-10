@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -22,6 +21,8 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection, Engine, URL, make_url
 from sqlalchemy.pool import NullPool
+
+from open_webui.utils.file_lock import exclusive_file_lock
 
 log = logging.getLogger(__name__)
 
@@ -347,8 +348,7 @@ def _locked_connection():
         db_path = Path(url.database).resolve()
         lock_path = db_path.with_suffix(db_path.suffix + ".halo-migration.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "a+", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        with exclusive_file_lock(lock_path):
             with engine.connect() as conn:
                 yield engine, conn, url
             engine.dispose()

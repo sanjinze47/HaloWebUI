@@ -197,7 +197,11 @@ class S3StorageProvider(StorageProvider):
                 file_size,
                 "s3://" + self.bucket_name + "/" + s3_key,
             )
-        except self.client_error as e:
+        except Exception as e:
+            try:
+                LocalStorageProvider.delete_file(file_path)
+            except Exception:
+                log.exception("Failed to clean S3 upload staging file %s", file_path)
             raise RuntimeError(f"Error uploading file to S3: {e}")
 
     def get_file(self, file_path: str) -> str:
@@ -285,7 +289,11 @@ class GCSStorageProvider(StorageProvider):
             blob = self.bucket.blob(filename)
             blob.upload_from_filename(file_path)
             return file_size, "gs://" + self.bucket_name + "/" + filename
-        except self.google_cloud_error as e:
+        except Exception as e:
+            try:
+                LocalStorageProvider.delete_file(file_path)
+            except Exception:
+                log.exception("Failed to clean GCS upload staging file %s", file_path)
             raise RuntimeError(f"Error uploading file to GCS: {e}")
 
     def get_file(self, file_path: str) -> str:
@@ -305,9 +313,10 @@ class GCSStorageProvider(StorageProvider):
         try:
             filename = file_path.removeprefix("gs://").split("/")[1]
             blob = self.bucket.get_blob(filename)
-            blob.delete()
-        except self.not_found_error as e:
-            raise RuntimeError(f"Error deleting file from GCS: {e}")
+            if blob is not None:
+                blob.delete()
+        except self.not_found_error:
+            pass
 
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
@@ -378,6 +387,10 @@ class AzureStorageProvider(StorageProvider):
                 blob_client.upload_blob(upload_file, overwrite=True)
             return file_size, f"{self.endpoint}/{self.container_name}/{filename}"
         except Exception as e:
+            try:
+                LocalStorageProvider.delete_file(file_path)
+            except Exception:
+                log.exception("Failed to clean Azure upload staging file %s", file_path)
             raise RuntimeError(f"Error uploading file to Azure Blob Storage: {e}")
 
     def get_file(self, file_path: str) -> str:
@@ -398,8 +411,8 @@ class AzureStorageProvider(StorageProvider):
             filename = file_path.split("/")[-1]
             blob_client = self.container_client.get_blob_client(filename)
             blob_client.delete_blob()
-        except self.resource_not_found_error as e:
-            raise RuntimeError(f"Error deleting file from Azure Blob Storage: {e}")
+        except self.resource_not_found_error:
+            pass
 
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)

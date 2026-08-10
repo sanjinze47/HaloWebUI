@@ -142,6 +142,8 @@ async def send_post_request(
 ):
 
     r = None
+    session = None
+    stream_handed_off = False
     try:
         session = aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
@@ -173,7 +175,7 @@ async def send_post_request(
             if content_type:
                 response_headers["Content-Type"] = content_type
 
-            return StreamingResponse(
+            stream_response = StreamingResponse(
                 r.content,
                 status_code=r.status,
                 headers=response_headers,
@@ -181,9 +183,10 @@ async def send_post_request(
                     cleanup_response, response=r, session=session
                 ),
             )
+            stream_handed_off = True
+            return stream_response
         else:
             res = await r.json()
-            await cleanup_response(r, session)
             return res
 
     except Exception as e:
@@ -191,6 +194,9 @@ async def send_post_request(
             status_code=r.status if r else 500,
             detail=await _read_ollama_aiohttp_error_detail(r, e),
         )
+    finally:
+        if not stream_handed_off:
+            await cleanup_response(r, session)
 
 
 def get_api_key(idx, url, configs):

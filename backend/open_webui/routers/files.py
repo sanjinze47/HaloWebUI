@@ -49,6 +49,7 @@ from open_webui.utils.file_upload_diagnostics import (
     is_archive_file,
 )
 from pydantic import BaseModel
+from open_webui.utils.file_cleanup import cleanup_file_dependencies
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -267,29 +268,48 @@ def _validate_uploaded_file(
 
 
 def _cleanup_failed_uploaded_file(file_id: str, file_path: str | None) -> None:
+    cleanup_error = None
+    file = Files.get_file_by_id(file_id, include_pending=True) if file_id else None
     if file_id:
-        try:
-            file_collection = f"file-{file_id}"
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-        except Exception as exc:
-            log.debug("Failed to delete temporary file collection %s: %s", file_id, exc)
-
-        try:
-            _clear_file_remote_cache(Files.get_file_by_id(file_id))
-        except Exception as exc:
-            log.debug("Failed to clear remote file cache %s: %s", file_id, exc)
-
-        try:
-            Files.delete_file_by_id(file_id)
-        except Exception as exc:
-            log.debug("Failed to delete file record %s: %s", file_id, exc)
-
-    if file_path:
+        if file:
+            pending = Files.update_file_metadata_by_id(
+                file_id,
+                {"deletion_pending": True, "deletion_last_error": None},
+            )
+            if not pending:
+                cleanup_error = RuntimeError(
+                    f"Failed to mark uploaded file {file_id} for deletion."
+                )
+        if cleanup_error is None:
+            try:
+                if file:
+                    cleanup_file_dependencies(file)
+                elif file_path:
+                    Storage.delete_file(file_path)
+            except Exception as exc:
+                log.debug("Failed to clean failed upload %s: %s", file_id, exc)
+                cleanup_error = exc
+    elif file_path:
         try:
             Storage.delete_file(file_path)
         except Exception as exc:
             log.debug("Failed to delete uploaded file %s: %s", file_path, exc)
+            cleanup_error = exc
+
+    if file_id:
+        if cleanup_error is None:
+            if not Files.delete_file_by_id(file_id):
+                cleanup_error = RuntimeError(
+                    f"Failed to delete file record {file_id}."
+                )
+        if cleanup_error is not None:
+            Files.update_file_metadata_by_id(
+                file_id,
+                {
+                    "deletion_pending": True,
+                    "deletion_last_error": str(cleanup_error),
+                },
+            )
 
 
 def _clear_file_remote_cache(file_obj: Optional[FileModel]) -> None:
@@ -427,6 +447,9 @@ def upload_file(
                 }
             ),
         )
+        if not file_item:
+            raise RuntimeError("Failed to persist uploaded file metadata.")
+
         # Auto mode is resolved after the final chat model/connection is known.
         # Keep the original upload untouched until then; knowledge-base uploads
         # continue to use their explicit retrieval mode.
@@ -603,25 +626,22 @@ async def search_files(
 
 @router.delete("/all")
 async def delete_all_files(user=Depends(get_admin_user)):
-    for file_obj in Files.get_files():
-        _clear_file_remote_cache(file_obj)
-    result = Files.delete_all_files()
-    if result:
+    failures = []
+    for file_obj in Files.get_files(include_pending=True):
         try:
-            Storage.delete_all_files()
-        except Exception as e:
-            log.exception(e)
-            log.error("Error deleting files")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-            )
-        return {"message": "All files deleted successfully"}
-    else:
+            await delete_file_by_id(file_obj.id, user=user)
+        except HTTPException as exc:
+            failures.append({"file_id": file_obj.id, "detail": exc.detail})
+    if failures:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "file_cleanup_pending",
+                "message": "Some files could not be deleted and can be retried.",
+                "failures": failures,
+            },
         )
+    return {"message": "All files deleted successfully"}
 
 
 ############################
@@ -882,7 +902,7 @@ async def get_file_content_by_id(id: str, user=Depends(get_verified_user)):
 
 @router.delete("/{id}")
 async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
-    file = Files.get_file_by_id(id)
+    file = Files.get_file_by_id(id, include_pending=True)
 
     if not file:
         raise HTTPException(
@@ -893,24 +913,42 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
     if _user_can_access_file(file, user, "write"):
         # We should add Chroma cleanup here
 
-        _clear_file_remote_cache(file)
+        pending_meta = dict(file.meta or {})
+        pending_meta["deletion_pending"] = True
+        pending_meta["deletion_last_error"] = None
+        pending = Files.update_file_metadata_by_id(id, pending_meta)
+        if not pending:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=ERROR_MESSAGES.DEFAULT("Error marking file for deletion"),
+            )
+        try:
+            _clear_file_remote_cache(pending)
+            cleanup_file_dependencies(file)
+        except Exception as e:
+            log.exception(e)
+            Files.update_file_metadata_by_id(
+                id,
+                {"deletion_pending": True, "deletion_last_error": str(e)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "file_cleanup_pending",
+                    "message": "File storage cleanup failed and can be retried.",
+                },
+            ) from e
+
         result = Files.delete_file_by_id(id)
         if result:
-            try:
-                Storage.delete_file(file.path)
-            except Exception as e:
-                log.exception(e)
-                log.error("Error deleting files")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-                )
             return {"message": "File deleted successfully"}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Error deleting file"),
-            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "file_cleanup_pending",
+                "message": "File record cleanup failed and can be retried.",
+            },
+        )
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

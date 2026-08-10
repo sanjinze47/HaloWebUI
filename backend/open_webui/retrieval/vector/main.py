@@ -13,6 +13,7 @@ class GetResult(BaseModel):
     ids: Optional[List[List[str]]]
     documents: Optional[List[List[str]]]
     metadatas: Optional[List[List[Any]]]
+    embeddings: Optional[List[List[List[float | int]]]] = None
 
 
 class SearchResult(GetResult):
