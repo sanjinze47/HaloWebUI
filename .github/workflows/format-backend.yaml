@@ -23,7 +23,6 @@ jobs:
     name: 'Backend Format and Tests'
     runs-on: ubuntu-latest
     env:
-      DATA_DIR: ${{ runner.temp }}/halowebui-pytest-data
       PYTHONPATH: backend
 
     strategy:
@@ -69,6 +68,8 @@ jobs:
           black --check "${changed_python[@]}"
 
       - name: Run backend unit tests
+        env:
+          DATA_DIR: ${{ runner.temp }}/halowebui-pytest-data
         run: |
           mkdir -p "$DATA_DIR"
           python -m pytest -q backend/open_webui/test/unit
