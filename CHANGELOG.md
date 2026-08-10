@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Displayed single generated images at their full aspect ratio in chat instead of clipping wide images inside a fixed portrait card.
-- Sent supported grok2api image edits as JSON data URLs, selected the edit route for reference-image requests, and resolved loopback result URLs through the configured provider origin.
+- Sent supported grok2api image edits as JSON data URLs, rejected empty successful responses, selected the edit route for reference-image requests, and resolved loopback result URLs through the configured provider origin.
 
 ## [0.2.3] - 2026-08-10
 

@@ -6170,6 +6170,9 @@ async def _generate_via_openai_image_edits_endpoint(
         payload["response_format"] = "b64_json"
 
     if use_grok2api_json_edit:
+        # grok2api validates and localizes URL results, including rejecting an
+        # otherwise misleading HTTP 200 response whose data array is empty.
+        payload["response_format"] = "url"
         request_payload = {
             **payload,
             "image": {"url": resolved_data_urls[0]},

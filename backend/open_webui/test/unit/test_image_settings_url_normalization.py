@@ -2832,7 +2832,7 @@ def test_grok2api_image_edit_payload_uses_json_data_urls(monkeypatch):
         "prompt": "change the subject",
         "n": 1,
         "size": "1024x1024",
-        "response_format": "b64_json",
+        "response_format": "url",
         "image": {"url": "data:image/png;base64,Zmlyc3QtaW1hZ2U="},
         "images": [
             {"url": "data:image/png;base64,c2Vjb25kLWltYWdl"},
@@ -2842,6 +2842,55 @@ def test_grok2api_image_edit_payload_uses_json_data_urls(monkeypatch):
     assert "form_fields" not in captured
     assert "image" not in captured["upload_metadata"]
     assert "images" not in captured["upload_metadata"]
+
+
+def test_grok2api_image_edit_rejects_empty_data_response(monkeypatch):
+    request = SimpleNamespace()
+    user = SimpleNamespace(id="user-1", role="admin")
+
+    monkeypatch.setattr(
+        images_router,
+        "_resolve_image_input_as_data_url",
+        lambda *_args, **_kwargs: (
+            "image/png",
+            b"source-image",
+            "data:image/png;base64,c291cmNlLWltYWdl",
+        ),
+    )
+
+    async def fake_send(**kwargs):
+        assert kwargs["request_kind"] == "json"
+        assert kwargs["json_body"]["response_format"] == "url"
+        return {
+            "status": 200,
+            "headers": {},
+            "response_body": '{"created": 1, "data": []}',
+        }
+
+    monkeypatch.setattr(images_router, "_send_openai_image_request", fake_send)
+
+    try:
+        asyncio.run(
+            images_router._generate_via_openai_image_edits_endpoint(
+                request,
+                user,
+                model_id="grok-imagine-image",
+                prompt="change the subject",
+                image_url="/api/v1/files/source/content",
+                n=1,
+                size=None,
+                background=None,
+                source={
+                    "base_url": "https://relay.example.com/v1",
+                    "key": "key-a",
+                    "api_config": {"image_edit_compatibility": "grok2api"},
+                },
+            )
+        )
+        assert False, "an empty image data array must not be reported as success"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "returned no images" in str(exc.detail)
 
 
 def test_grok2api_image_edit_preserves_upstream_error(monkeypatch):

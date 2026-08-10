@@ -58,8 +58,10 @@ upstream commit, and verification date. Distinguish:
   use `max_output_tokens`.
 - `OPENAI_API_CONFIGS[index].image_edit_compatibility` accepts `standard` or
   `grok2api`. The latter enables grok2api's JSON data-URL image edit protocol;
-  standard OpenAI-compatible image edits remain multipart. Legacy connections whose
-  configured name contains `grok2api` retain the grok2api behavior.
+  standard OpenAI-compatible image edits remain multipart. grok2api edits request URL
+  results so the adapter can reject empty successful responses and localize returned
+  media. Legacy connections whose configured name contains `grok2api` retain the
+  grok2api behavior.
 - `OPENAI_API_CONFIGS[index].responses_compatibility` accepts `standard`,
   `sub2api`, or `custom`. Invalid persisted or submitted values are configuration
   errors and never silently become `standard`.
