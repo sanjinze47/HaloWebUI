@@ -10,10 +10,11 @@ const limits = {
 };
 
 const executable = path.resolve('node_modules/svelte-check/bin/svelte-check');
+const outputFilter = path.resolve('scripts/lib/svelte-check-summary-output.cjs');
 const result = await new Promise((resolve, reject) => {
 	const child = spawn(
 		process.execPath,
-		[executable, '--tsconfig', './tsconfig.json', '--output', 'machine'],
+		['--require', outputFilter, executable, '--tsconfig', './tsconfig.json', '--output', 'machine'],
 		{
 			cwd: process.cwd(),
 			stdio: ['ignore', 'pipe', 'pipe']

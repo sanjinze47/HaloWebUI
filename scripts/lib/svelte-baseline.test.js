@@ -1,3 +1,6 @@
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { keepOutputTail, parseSvelteSummary } from './svelte-baseline.mjs';
@@ -19,5 +22,22 @@ describe('Svelte diagnostic baseline parser', () => {
 
 	it('retains only the bounded output tail', () => {
 		expect(keepOutputTail('abcdef', 'ghij', 6)).toBe('efghij');
+	});
+
+	it('forwards completion records without buffering diagnostics', () => {
+		const outputFilter = path.resolve('scripts/lib/svelte-check-summary-output.cjs');
+		const result = spawnSync(
+			process.execPath,
+			[
+				'--require',
+				outputFilter,
+				'--eval',
+				`process.stdout.write('1 ERROR "file" 1:1 "diagnostic"\\n'); process.stdout.write('2 COMPLETED 10 FILES 3 ERRORS 1 WARNINGS 2 FILES_WITH_PROBLEMS\\n');`
+			],
+			{ encoding: 'utf8' }
+		);
+
+		expect(result.status).toBe(0);
+		expect(result.stdout).toBe('2 COMPLETED 10 FILES 3 ERRORS 1 WARNINGS 2 FILES_WITH_PROBLEMS\n');
 	});
 });
