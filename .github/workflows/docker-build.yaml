@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: Optional semver image version to publish from the selected ref
+        description: Optional X.Y.Z stable version to retry from source_ref vX.Y.Z
         required: false
         type: string
       source_ref:
-        description: Optional source branch or tag to build
+        description: Required matching vX.Y.Z tag for a stable-version retry
         required: false
         type: string
   push:
@@ -42,20 +42,54 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Validate manual edge source
+        if: github.event_name == 'workflow_dispatch' && inputs.version_tag == ''
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" || -n "$SOURCE_REF" ]]; then
+            echo "Manual edge rebuilds must run from main without source_ref." >&2
+            exit 1
+          fi
+
       - name: Validate tag against package version
         if: startsWith(github.ref, 'refs/tags/') || inputs.version_tag != ''
         env:
           RELEASE_TAG: ${{ inputs.version_tag || github.ref_name }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
           tag="${RELEASE_TAG#v}"
           version="$(node -p "require('./package.json').version")"
+          lock_version="$(node -p "require('./package-lock.json').version")"
+          lock_root_version="$(node -p "require('./package-lock.json').packages[''].version")"
           if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release version: $tag (expected X.Y.Z)" >&2
             exit 1
           fi
           if [[ "$tag" != "$version" ]]; then
             echo "Tag $tag does not match package.json version $version" >&2
+            exit 1
+          fi
+          if [[ "$version" != "$lock_version" || "$version" != "$lock_root_version" ]]; then
+            echo "package-lock.json versions do not match package.json version $version" >&2
+            exit 1
+          fi
+          if ! grep -Fq "## [$version] - " CHANGELOG.md; then
+            echo "CHANGELOG.md has no dated release section for $version" >&2
+            exit 1
+          fi
+          expected_ref="v$tag"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$SOURCE_REF" != "$expected_ref" ]]; then
+            echo "Stable retries must use source_ref $expected_ref" >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-list -n 1 "$expected_ref")"
+          source_commit="$(git rev-parse HEAD)"
+          if [[ -z "$tag_commit" || "$tag_commit" != "$source_commit" ]]; then
+            echo "Checked out source is not the exact $expected_ref commit" >&2
             exit 1
           fi
 
@@ -121,22 +155,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Extract metadata for Docker images (default latest tag)
+      - name: Extract metadata for full image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' && inputs.version_tag == '' }}
             type=sha,prefix=git-
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ env.IMAGE_VERSION_TAG }},enable=${{ inputs.version_tag != '' }}
           flavor: |
-            latest=${{ github.ref == 'refs/heads/main' }}
+            latest=${{ startsWith(github.ref, 'refs/tags/v') || inputs.version_tag != '' }}
 
-      - name: Build Docker image (latest)
+      - name: Build full Docker image
         uses: docker/build-push-action@v6
         id: build
         with:
@@ -223,20 +255,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Extract metadata for Docker images (default latest tag)
+      - name: Extract metadata for full image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' && inputs.version_tag == '' }}
             type=sha,prefix=git-
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ env.IMAGE_VERSION_TAG }},enable=${{ inputs.version_tag != '' }}
           flavor: |
-            latest=${{ github.ref == 'refs/heads/main' }}
+            latest=${{ startsWith(github.ref, 'refs/tags/v') || inputs.version_tag != '' }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -314,10 +344,10 @@ jobs:
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
-            type=raw,value=slim,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=edge-slim,enable=${{ github.ref == 'refs/heads/main' && inputs.version_tag == '' }}
+            type=raw,value=slim,enable=${{ startsWith(github.ref, 'refs/tags/v') || inputs.version_tag != '' }}
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
-            type=semver,pattern={{major}}.{{minor}}-slim
             type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Build Docker image (slim)
@@ -411,10 +441,10 @@ jobs:
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
-            type=raw,value=slim,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=edge-slim,enable=${{ github.ref == 'refs/heads/main' && inputs.version_tag == '' }}
+            type=raw,value=slim,enable=${{ startsWith(github.ref, 'refs/tags/v') || inputs.version_tag != '' }}
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
-            type=semver,pattern={{major}}.{{minor}}-slim
             type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
 
       - name: Create manifest list and push

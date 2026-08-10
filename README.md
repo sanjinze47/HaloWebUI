@@ -74,7 +74,7 @@ docker compose up -d
 
 ### GHCR 版本、升级与回滚
 
-默认 Compose 配置使用 `ghcr.io/sanjinze47/halowebui:latest`。`latest` 跟随 `main` 分支的成功构建；当前固定版本为 `0.2.0`，完整镜像标签为 `0.2.0`，轻量镜像标签为 `0.2.0-slim`。Compose 会始终挂载 `open-webui:/app/backend/data`，升级或回滚不会覆盖数据库和上传文件。
+默认 Compose 配置使用 `ghcr.io/sanjinze47/halowebui:latest`。`latest` 只跟随明确发布的正式版本；`edge` 跟随 `main` 分支的成功构建，仅用于测试。Compose 会始终挂载 `open-webui:/app/backend/data`，替换容器、升级或回滚不会主动删除数据库和上传文件。
 
 升级到最新 `latest`：
 
@@ -83,11 +83,12 @@ docker compose pull
 docker compose up -d
 ```
 
-生产环境建议固定到 `0.2.0`，避免自动获取未预期的更新：
+生产环境建议从 [GitHub Releases](https://github.com/sanjinze47/HaloWebUI/releases) 选择一个明确的 `X.Y.Z` 版本并固定部署：
 
 ```bash
-WEBUI_DOCKER_TAG=0.2.0 docker compose pull
-WEBUI_DOCKER_TAG=0.2.0 docker compose up -d
+HALO_VERSION=X.Y.Z
+WEBUI_DOCKER_TAG="$HALO_VERSION" docker compose pull
+WEBUI_DOCKER_TAG="$HALO_VERSION" docker compose up -d
 ```
 
 回滚时把 `WEBUI_DOCKER_TAG` 改为需要的历史版本（例如 `0.1.0`），再重新拉取并启动：
@@ -97,16 +98,18 @@ WEBUI_DOCKER_TAG=0.1.0 docker compose pull
 WEBUI_DOCKER_TAG=0.1.0 docker compose up -d
 ```
 
-使用 slim 镜像时，将 Compose 文件叠加为 `docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d`；main 构建使用 `slim`，固定版本通过版本号自动拼接为 `0.2.0-slim`：
+使用最新正式 slim 镜像时，将 Compose 文件叠加并指定 `slim`：
 
 ```bash
-WEBUI_DOCKER_TAG=0.2.0 docker compose -f docker-compose.yaml -f docker-compose.slim.yaml pull
-WEBUI_DOCKER_TAG=0.2.0 docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d
+WEBUI_DOCKER_TAG=slim docker compose -f docker-compose.yaml -f docker-compose.slim.yaml pull
+WEBUI_DOCKER_TAG=slim docker compose -f docker-compose.yaml -f docker-compose.slim.yaml up -d
 ```
+
+固定 slim 版本使用 `WEBUI_DOCKER_TAG=X.Y.Z-slim`。测试尚未正式发布的 `main` 构建时，完整镜像使用 `edge`，轻量镜像使用 `edge-slim`；不要把这两个标签用于需要稳定回滚的生产部署。
 
 GHCR 认证：
 
-- **公开镜像**：在 GitHub Packages 将 `halowebui` 设置为 **Public** 后，拉取 `latest`、`0.2.0` 或对应 slim 标签无需登录。
+- **公开镜像**：在 GitHub Packages 将 `halowebui` 设置为 **Public** 后，拉取 `latest`、正式版本号或对应 slim 标签无需登录。
 - **私有镜像**：使用具有 `read:packages` 权限的个人访问令牌登录；不要把令牌写入仓库或 Compose 文件。
 
 ```bash

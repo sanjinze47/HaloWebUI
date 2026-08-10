@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "providers": {
+    "sub2api": {
+      "base_url": "http://127.0.0.1:8080/v1",
+      "compatibility": "sub2api",
+      "chat_model": "",
+      "image_model": ""
+    }
+  }
+}
