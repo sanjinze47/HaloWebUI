@@ -39,26 +39,29 @@ const result = await new Promise((resolve, reject) => {
 const summary = parseSvelteSummary(`${result.stdoutTail}\n${result.stderrTail}`);
 
 if (!summary) {
-	process.stderr.write(result.stdoutTail);
-	process.stderr.write(result.stderrTail);
 	console.error(
 		`Unable to parse the svelte-check machine summary (exit ${result.code ?? 'unknown'}, signal ${result.signal ?? 'none'}).`
 	);
-	process.exit(result.code || 1);
-}
-
-console.log(
-	`Svelte baseline: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.files} files ` +
-		`(limits: ${limits.errors}/${limits.warnings}/${limits.files}).`
-);
-
-const exceeded = Object.entries(limits).filter(([key, limit]) => summary[key] > limit);
-if (exceeded.length > 0) {
-	for (const [key, limit] of exceeded) {
-		console.error(`svelte-check ${key} increased to ${summary[key]} (limit ${limit}).`);
+	const failureTail = `${result.stdoutTail}\n${result.stderrTail}`.slice(-8 * 1024);
+	if (failureTail.trim()) {
+		console.error('Last svelte-check output:');
+		process.stderr.write(failureTail);
 	}
-	console.error('Run npm run check:raw for the complete diagnostics.');
-	process.exit(1);
-}
+	process.exitCode = result.code || 1;
+} else {
+	console.log(
+		`Svelte baseline: ${summary.errors} errors, ${summary.warnings} warnings, ${summary.files} files ` +
+			`(limits: ${limits.errors}/${limits.warnings}/${limits.files}).`
+	);
 
-console.log('Svelte diagnostic baseline did not increase.');
+	const exceeded = Object.entries(limits).filter(([key, limit]) => summary[key] > limit);
+	if (exceeded.length > 0) {
+		for (const [key, limit] of exceeded) {
+			console.error(`svelte-check ${key} increased to ${summary[key]} (limit ${limit}).`);
+		}
+		console.error('Run npm run check:raw for the complete diagnostics.');
+		process.exitCode = 1;
+	} else {
+		console.log('Svelte diagnostic baseline did not increase.');
+	}
+}
