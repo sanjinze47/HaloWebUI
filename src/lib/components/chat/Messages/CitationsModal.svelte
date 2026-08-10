@@ -134,7 +134,8 @@
 	}
 </script>
 
-<Drawer
+{#if show}
+	<Drawer
 	placement={$mobile ? 'bottom' : 'right'}
 	bind:show
 	className={$mobile
@@ -427,4 +428,5 @@
 			</section>
 		</div>
 	</div>
-</Drawer>
+	</Drawer>
+{/if}
