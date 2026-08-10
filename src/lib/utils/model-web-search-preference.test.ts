@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	getModelBuiltinWebSearchPreference,
-	resolveModelBuiltinWebSearchState
+	resolveModelBuiltinWebSearchState,
+	resolveSelectedModelBuiltinWebSearchState
 } from './model-web-search-preference';
 
 describe('model builtin web search preference', () => {
@@ -51,5 +52,32 @@ describe('model builtin web search preference', () => {
 				() => 'auto'
 			)
 		).toEqual({ mode: 'auto', source: 'model' });
+	});
+
+	it('retries a pending selection after the model lookup is populated', () => {
+		const modelLookup = new Map<string, Record<string, any>>();
+		const pickEnabledMode = () => 'native' as const;
+
+		expect(
+			resolveSelectedModelBuiltinWebSearchState(
+				['grok-model'],
+				modelLookup,
+				'native',
+				pickEnabledMode
+			)
+		).toBe(null);
+
+		modelLookup.set('grok-model', {
+			info: { meta: { builtin_tool_config: { ENABLE_WEB_SEARCH_TOOL: false } } }
+		});
+
+		expect(
+			resolveSelectedModelBuiltinWebSearchState(
+				['grok-model'],
+				modelLookup,
+				'native',
+				pickEnabledMode
+			)
+		).toEqual({ mode: 'off', source: 'model' });
 	});
 });

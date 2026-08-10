@@ -98,7 +98,7 @@
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
 	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
-	import { resolveModelBuiltinWebSearchState } from '$lib/utils/model-web-search-preference';
+	import { resolveSelectedModelBuiltinWebSearchState } from '$lib/utils/model-web-search-preference';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import {
 		buildWebSearchModeOptions,
@@ -999,17 +999,9 @@
 		mode: WebSearchMode;
 		source: WebSearchModeSource;
 	} | null => {
-		const requestedIds = selectedModelIds.filter(
-			(id): id is string => typeof id === 'string' && id.trim() !== ''
-		);
-		const resolvedModels = getResolvedSelectedWebSearchModels();
-
-		if (requestedIds.length > 0 && resolvedModels.length !== requestedIds.length) {
-			return null;
-		}
-
-		return resolveModelBuiltinWebSearchState(
-			resolvedModels,
+		return resolveSelectedModelBuiltinWebSearchState(
+			selectedModelIds,
+			modelsMap,
 			getPreferredDefaultWebSearchMode(),
 			pickModelDefaultWebSearchMode
 		);
@@ -2308,6 +2300,15 @@
 	}
 
 	$: {
+		// Keep this synchronization reactive while the model list and user config load asynchronously.
+		selectedModelIds;
+		modelsMap;
+		$config?.features?.enable_halo_web_search;
+		$config?.features?.enable_web_search;
+		$config?.features?.enable_native_web_search;
+		$config?.features?.default_web_search_mode;
+		$user?.role;
+		$user?.permissions?.features?.web_search;
 		const selectionDrivenState = getSelectionDrivenWebSearchState();
 		const shouldApplyModelOff =
 			selectionDrivenState?.source === 'model' && selectionDrivenState.mode === 'off';
