@@ -78,8 +78,6 @@
 	}
 
 	function openCitation(citation: Citation) {
-		if (!inlineCitationsVisible) return;
-
 		selectedCitation = citation;
 		showCitationDrawer = true;
 	}
@@ -171,10 +169,6 @@
 		openCitation(citation);
 		return true;
 	}
-
-	$: if (!inlineCitationsVisible) {
-		closeCitationDrawer();
-	}
 </script>
 
 <CitationsModal
@@ -186,10 +180,10 @@
 	on:close={closeCitationDrawer}
 />
 
-{#if citations.length > 0 && inlineCitationsVisible}
+{#if citations.length > 0}
 	{@const hasWebCitations = citations.some(isWebCitation)}
 	<div class="-mx-0.5 mt-2 w-full">
-		{#if inlineCitationsVisible}
+		{#if true}
 			<div
 				class="rounded-lg border border-black/10 bg-black/[0.025] p-1.5 dark:border-white/10 dark:bg-white/[0.025]"
 			>
@@ -199,7 +193,9 @@
 							<Tooltip
 								content={tr(
 									'隐藏引用来源（含正文标签）',
-									'Hide citation sources (including inline markers)'
+									inlineCitationsVisible
+										? 'Hide inline citation markers'
+										: 'Show inline citation markers'
 								)}
 								placement="bottom"
 							>
@@ -208,12 +204,18 @@
 									class="flex size-7 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/5 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-200"
 									aria-label={tr(
 										'隐藏引用来源（含正文标签）',
-										'Hide citation sources (including inline markers)'
+										inlineCitationsVisible
+											? 'Hide inline citation markers'
+											: 'Show inline citation markers'
 									)}
 									aria-pressed={inlineCitationsVisible}
 									on:click={onToggleInlineCitations}
 								>
-									<EyeOff className="size-3.5" strokeWidth={2.1} />
+									{#if inlineCitationsVisible}
+										<EyeOff className="size-3.5" strokeWidth={2.1} />
+									{:else}
+										<Eye className="size-3.5" strokeWidth={2.1} />
+									{/if}
 								</button>
 							</Tooltip>
 						{/if}
