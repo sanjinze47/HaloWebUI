@@ -6,6 +6,8 @@ import {
 	getCitationEntries,
 	getCitationFaviconUrl,
 	getCitationSourceUrl,
+	getCitationSourceUrls,
+	getCitationUrlKey,
 	hasUsefulCitationExcerpt,
 	isPlaceholderCitationTitle,
 	normalizeCitationUrl
@@ -84,5 +86,19 @@ describe('citation source normalization', () => {
 	it('does not render a title-only citation as an excerpt', () => {
 		expect(hasUsefulCitationExcerpt('1', 'bbc.com')).toBe(false);
 		expect(hasUsefulCitationExcerpt('A real excerpt from the source.', 'bbc.com')).toBe(true);
+	});
+
+	it('collects citation URLs and ignores tracking query parameters when matching links', () => {
+		expect(
+			getCitationSourceUrls([
+				{
+					id: 'web:https://example.com/article',
+					metadata: [{ link: 'https://example.com/other' }]
+				}
+			])
+		).toEqual(['https://example.com/article', 'https://example.com/other']);
+		expect(getCitationUrlKey('https://example.com/article?utm_source=openai')).toBe(
+			'https://example.com/article'
+		);
 	});
 });

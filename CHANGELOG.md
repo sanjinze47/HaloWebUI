@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Hid citation source cards and inline citation markers by default, and synchronized citation drawer close state so citations can be dismissed cleanly.
 - Prevented hidden citation drawers from remaining mounted and appearing automatically on pages with multiple search responses.
+- Hid source URLs rendered as ordinary Markdown links when citation visibility is disabled, including their surrounding parentheses.
 - Allowed normal Responses `response.created` and `response.in_progress` events to pass through instead of treating their expected `in_progress` status as a failed conversation.
 - Accepted terminal Responses events with a stale `in_progress` status from compatibility gateways while retaining direct-response and explicit failure validation.
 

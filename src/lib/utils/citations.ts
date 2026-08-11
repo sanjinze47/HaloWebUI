@@ -145,3 +145,43 @@ export const getCitationEntries = (citation: any) => {
 		};
 	});
 };
+
+export const getCitationSourceUrls = (citations: unknown): string[] => {
+	const urls = new Set<string>();
+
+	normalizeCitationList(citations).forEach((citation) => {
+		if (!citation || typeof citation !== 'object') return;
+
+		const addUrl = (value: unknown) => {
+			const url = normalizeCitationUrl(value);
+			if (url) urls.add(url);
+		};
+
+		addUrl(getCitationSourceUrl(citation));
+		getCitationEntries(citation).forEach(({ metadata }) => {
+			addUrl(metadata?.url);
+			addUrl(metadata?.link);
+			addUrl(metadata?.source);
+		});
+	});
+
+	return [...urls];
+};
+
+export const getCitationUrlKey = (value: unknown): string => {
+	const normalized = normalizeCitationUrl(value);
+	if (!normalized) return '';
+
+	try {
+		const url = new URL(normalized);
+		const search = [...url.searchParams]
+			.filter(([key]) => !/^(utm_|gclid$|fbclid$)/i.test(key))
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, item]) => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`)
+			.join('&');
+		const path = url.pathname.replace(/\/+$/, '') || '/';
+		return `${url.origin}${path}${search ? `?${search}` : ''}`.toLowerCase();
+	} catch {
+		return normalized.toLowerCase();
+	}
+};

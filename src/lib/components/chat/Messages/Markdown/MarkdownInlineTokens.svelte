@@ -5,6 +5,7 @@
 	import type { Token } from 'marked';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
+	import { writable } from 'svelte/store';
 
 	const i18n: Writable<any> = getContext('i18n');
 
@@ -28,6 +29,7 @@
 	import Source from './Source.svelte';
 	import SourceToken from './SourceToken.svelte';
 	import { isSvgMarkup, mergeSvgMarkupTokens, type RenderableHtmlToken } from './svgMarkupTokens';
+	import { getCitationUrlKey } from '$lib/utils/citations';
 
 	export let id: string;
 	export let tokens: Token[] = [];
@@ -35,8 +37,19 @@
 	export let charAnimation = false;
 	export let generatedFiles: GeneratedMessageFile[] = [];
 
+	type CitationVisibility = {
+		citationUrls: string[];
+		hideInlineCitations: boolean;
+	};
+
+	const citationVisibility =
+		getContext<Writable<CitationVisibility>>('citationVisibility') ??
+		writable<CitationVisibility>({ citationUrls: [], hideInlineCitations: false });
+
 	let renderTokens: RenderableHtmlToken[] = [];
+	let citationUrlKeys = new Set<string>();
 	$: renderTokens = mergeSvgMarkupTokens(tokens);
+	$: citationUrlKeys = new Set(($citationVisibility?.citationUrls ?? []).map(getCitationUrlKey));
 
 	const SAFE_HTML_URI_REGEXP =
 		/^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:(?:text\/(?:plain|csv|markdown)|application\/(?:json|pdf|zip|vnd\.openxmlformats-officedocument\.(?:spreadsheetml\.sheet|wordprocessingml\.document))|image\/(?:png|jpeg|jpg|gif|webp))(?:[;,]|$))/i;
@@ -65,9 +78,29 @@
 
 	const toText = (value: unknown) => String(value ?? '');
 	const decodeHtmlText = (value: unknown) => unescapeHtml(toText(value)) ?? '';
+
+	const isHiddenCitationLink = (token: any) => {
+		if (!$citationVisibility?.hideInlineCitations || token?.type !== 'link') return false;
+		const href = resolveLinkHref(token.href ?? '');
+		return Boolean(href && citationUrlKeys.has(getCitationUrlKey(href)));
+	};
+
+	const getVisibleText = (token: any, tokenIdx: number) => {
+		let text = toText(token.raw ?? token.text);
+		if (!$citationVisibility?.hideInlineCitations || token?.type !== 'text') return text;
+
+		if (isHiddenCitationLink(renderTokens[tokenIdx + 1])) {
+			text = text.replace(/[\(\uff08]\s*$/, '');
+		}
+		if (isHiddenCitationLink(renderTokens[tokenIdx - 1])) {
+			text = text.replace(/^\s*[\)\uff09]\s*/, '');
+		}
+
+		return text;
+	};
 </script>
 
-{#each renderTokens as token}
+{#each renderTokens as token, tokenIdx}
 	{#if token.type === 'escape'}
 		{#if charAnimation}
 			{#each [...decodeHtmlText(token.text)] as char}<span class="stream-char">{char}</span>{/each}
@@ -108,7 +141,9 @@
 	{:else if token.type === 'link'}
 		{@const href = resolveLinkHref(token.href ?? '')}
 		{@const download = href ? resolveDownloadName(href, token.text ?? '') : null}
-		{#if href && token.tokens}
+		{#if isHiddenCitationLink(token)}
+			<!-- Citation links are controlled by the same visibility preference as source buttons. -->
+		{:else if href && token.tokens}
 			<a
 				{href}
 				target={download ? undefined : '_blank'}
@@ -211,11 +246,11 @@
 	{:else if token.type === 'citation'}
 		<SourceToken {id} {token} onClick={onSourceClick} />
 	{:else if token.type === 'text'}
+		{@const visibleText = getVisibleText(token, tokenIdx)}
 		{#if charAnimation}
-			{#each [...toText(token.raw ?? token.text)] as char}<span class="stream-char">{char}</span
-				>{/each}
+			{#each [...visibleText] as char}<span class="stream-char">{char}</span>{/each}
 		{:else}
-			{toText(token.raw ?? token.text)}
+			{visibleText}
 		{/if}
 	{/if}
 {/each}

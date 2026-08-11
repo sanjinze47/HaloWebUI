@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { createEventDispatcher, onDestroy } from 'svelte';
+	import { createEventDispatcher, onDestroy, setContext } from 'svelte';
 	import { Marked, Tokenizer, type Token } from 'marked';
+	import { writable } from 'svelte/store';
 
 	import { replaceTokens, processResponseContent } from '$lib/utils';
 	import { user } from '$lib/stores';
@@ -29,6 +30,8 @@
 	export let transitionMode: ChatTransitionMode = DEFAULT_CHAT_TRANSITION_MODE;
 
 	export let sourceIds = [];
+	export let citationUrls: string[] = [];
+	export let hideInlineCitations = false;
 	export let headings: HeadingItem[] = [];
 	export let generatedFiles: GeneratedMessageFile[] = [];
 
@@ -42,6 +45,18 @@
 	let delayedAnimatedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastLexedContent = '';
 	let effectiveTransitionMode: ChatTransitionMode = transitionMode;
+
+	type CitationVisibility = {
+		citationUrls: string[];
+		hideInlineCitations: boolean;
+	};
+
+	const citationVisibility = writable<CitationVisibility>({
+		citationUrls: [],
+		hideInlineCitations: false
+	});
+	setContext('citationVisibility', citationVisibility);
+	$: citationVisibility.set({ citationUrls, hideInlineCitations });
 
 	let smoothStreamController = createSmoothStreamContentController({
 		enabled: false,
@@ -123,11 +138,7 @@
 	};
 
 	$: processedContent = content
-		? replaceTokens(
-				processResponseContent(content),
-				getModelChatDisplayName(model),
-				$user?.name
-			)
+		? replaceTokens(processResponseContent(content), getModelChatDisplayName(model), $user?.name)
 		: '';
 
 	const hasStreamingReasoningDetails = (value: string) =>
@@ -167,8 +178,7 @@
 	}
 
 	$: {
-		const nextLexedContent =
-			renderTransitionMode !== 'none' ? renderedContent : processedContent;
+		const nextLexedContent = renderTransitionMode !== 'none' ? renderedContent : processedContent;
 
 		if (nextLexedContent !== lastLexedContent) {
 			lastLexedContent = nextLexedContent;

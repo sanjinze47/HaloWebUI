@@ -1642,7 +1642,7 @@
 												{isLastMessage}
 												generatedFiles={message.files ?? []}
 												forceExpand={forceExpandContent}
-												sources={message.sources}
+												sources={message.sources ?? message.citations}
 												floatingButtons={message?.done &&
 													!readOnly &&
 													($settings?.showFloatingActionButtons ?? true)}

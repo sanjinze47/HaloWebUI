@@ -24,7 +24,7 @@
 		preserveCodeBlockText,
 		type CodeCopyPayload
 	} from '$lib/utils/code-copy';
-	import { getCitationEntries } from '$lib/utils/citations';
+	import { getCitationEntries, getCitationSourceUrls } from '$lib/utils/citations';
 	import type { GeneratedMessageFile } from '$lib/utils/generated-file-links';
 	import {
 		resolveChatTransitionMode,
@@ -122,6 +122,7 @@
 	let syncThreadLayoutsRaf = 0;
 	let hadThreadLayouts = false;
 	let resolvedSourceIds: any[] = [];
+	let resolvedCitationUrls: string[] = [];
 
 	const INLINE_CITATION_SELECTOR = '[data-inline-citation="true"]';
 
@@ -498,6 +499,7 @@
 	};
 
 	$: resolvedSourceIds = resolveSourceIds(sources);
+	$: resolvedCitationUrls = getCitationSourceUrls(sources);
 
 	const handleFloatingAdd = ({ modelId, parentId, messages }: AddMessagesPayload = {}) => {
 		onAddMessages({ modelId, parentId, messages });
@@ -859,6 +861,8 @@
 			{save}
 			{streaming}
 			{generatedFiles}
+			citationUrls={resolvedCitationUrls}
+			hideInlineCitations={!($settings?.showInlineCitations ?? false)}
 			transitionMode={currentTransitionMode}
 			sourceIds={resolvedSourceIds}
 			{onSourceClick}
