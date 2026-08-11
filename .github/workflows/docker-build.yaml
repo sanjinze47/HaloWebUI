@@ -349,6 +349,8 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
+          flavor: |
+            latest=false
 
       - name: Build Docker image (slim)
         uses: docker/build-push-action@v6
@@ -446,6 +448,8 @@ jobs:
             type=sha,prefix=git-,suffix=-slim
             type=semver,pattern={{version}}-slim
             type=raw,value=${{ env.IMAGE_VERSION_TAG }}-slim,enable=${{ inputs.version_tag != '' }}
+          flavor: |
+            latest=false
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
