@@ -3369,7 +3369,7 @@ ENABLE_IMAGE_GENERATION_SHARED_KEY = PersistentConfig(
 ENABLE_VIDEO_GENERATION = PersistentConfig(
     "ENABLE_VIDEO_GENERATION",
     "video_generation.enable",
-    os.environ.get("ENABLE_VIDEO_GENERATION", "False").lower() == "true",
+    os.environ.get("ENABLE_VIDEO_GENERATION", "True").lower() == "true",
 )
 
 ENABLE_VIDEO_GENERATION_SHARED_KEY = PersistentConfig(

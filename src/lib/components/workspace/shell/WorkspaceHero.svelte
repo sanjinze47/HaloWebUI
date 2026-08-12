@@ -33,6 +33,13 @@
 		let reordered = swapTabs(items, 'tools', 'images');
 		reordered = swapTabs(reordered, 'tools', 'terminal');
 		reordered = swapTabs(reordered, 'images', 'skills');
+		const videoIndex = reordered.findIndex((tab) => tab.key === 'videos');
+		if (videoIndex !== -1) {
+			const [videoTab] = reordered.splice(videoIndex, 1);
+			const imageIndex = reordered.findIndex((tab) => tab.key === 'images');
+			if (imageIndex !== -1) reordered.splice(imageIndex + 1, 0, videoTab);
+			else reordered.push(videoTab);
+		}
 		return reordered;
 	};
 

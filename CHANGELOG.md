@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added backend capability metadata, persistent job history, progress polling, MP4 archiving,
   result download/deletion, shared-key controls, and the `Video Generation` user-group permission.
 
+### Changed
+
+- Video Generation is enabled by default when no environment override is supplied, and its workspace
+  entry is displayed immediately beside Image Generation with Chinese UI text in the Simplified Chinese locale.
+
 ## [0.2.7] - 2026-08-11
 
 ### Fixed
