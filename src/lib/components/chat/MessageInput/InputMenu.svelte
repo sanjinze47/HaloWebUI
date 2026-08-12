@@ -48,6 +48,7 @@
 	];
 	export let onWebSearchModeChange: ((mode: WebSearchMode) => void) | null = null;
 	export let imageGenerationEnabled: boolean = false;
+	export let imageGenerationAllowed: boolean = true;
 	export let codeInterpreterEnabled: boolean = false;
 	export let responseHtmlFormat: boolean = false;
 	export let onResponseHtmlFormatChange: ((enabled: boolean) => void | Promise<void>) | null = null;
@@ -437,7 +438,7 @@
 					</DropdownMenu.Sub>
 				{/if}
 
-				{#if $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
+				{#if imageGenerationAllowed && $config?.features?.enable_image_generation && ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)}
 					<button
 						type="button"
 						class="flex w-full justify-between gap-2 items-center px-3 py-2 text-sm font-medium cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800"

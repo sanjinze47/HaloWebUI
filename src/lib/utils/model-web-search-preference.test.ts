@@ -1,12 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	getModelBuiltinToolPreference,
 	getModelBuiltinWebSearchPreference,
+	resolveModelBuiltinImageGenerationPreference,
 	resolveModelBuiltinWebSearchState,
 	resolveSelectedModelBuiltinWebSearchState
 } from './model-web-search-preference';
 
 describe('model builtin web search preference', () => {
+	it('reads any built-in tool preference from model info metadata', () => {
+		expect(
+			getModelBuiltinToolPreference(
+				{ info: { meta: { builtin_tool_config: { ENABLE_IMAGE_GENERATION_TOOL: false } } } },
+				'ENABLE_IMAGE_GENERATION_TOOL'
+			)
+		).toBe(false);
+	});
+
+	it('resolves image-generation defaults across selected models', () => {
+		expect(
+			resolveModelBuiltinImageGenerationPreference([
+				{ info: { meta: { builtin_tool_config: { ENABLE_IMAGE_GENERATION_TOOL: true } } } }
+			])
+		).toBe(true);
+		expect(
+			resolveModelBuiltinImageGenerationPreference([
+				{ info: { meta: { builtin_tool_config: { ENABLE_IMAGE_GENERATION_TOOL: true } } } },
+				{ meta: { builtin_tool_config: { ENABLE_IMAGE_GENERATION_TOOL: false } } }
+			])
+		).toBe(false);
+		expect(resolveModelBuiltinImageGenerationPreference([{ meta: {} }])).toBe(null);
+	});
+
 	it('reads explicit preferences from model meta and info meta', () => {
 		expect(
 			getModelBuiltinWebSearchPreference({

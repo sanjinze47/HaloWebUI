@@ -75,6 +75,7 @@
 	export let selectedSkillIds = [];
 	export let skillSelectionTouched = false;
 	export let imageGenerationEnabled = false;
+	export let imageGenerationAllowed = true;
 	export let imageGenerationOptions = {};
 	export let codeInterpreterEnabled = false;
 	export let webSearchMode: WebSearchMode = 'off';
@@ -327,6 +328,7 @@
 					bind:selectedSkillIds
 					bind:skillSelectionTouched
 					bind:imageGenerationEnabled
+					{imageGenerationAllowed}
 					bind:imageGenerationOptions
 					bind:codeInterpreterEnabled
 					bind:webSearchMode

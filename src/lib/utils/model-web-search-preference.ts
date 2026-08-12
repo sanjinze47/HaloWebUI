@@ -6,14 +6,36 @@ export type ModelWebSearchState = {
 	source: WebSearchModeSource;
 };
 
-export const getModelBuiltinWebSearchPreference = (
-	model: Model | Record<string, any> | null | undefined
+export const getModelBuiltinToolPreference = (
+	model: Model | Record<string, any> | null | undefined,
+	key: string
 ): boolean | null => {
 	const value =
-		(model as any)?.info?.meta?.builtin_tool_config?.ENABLE_WEB_SEARCH_TOOL ??
-		(model as any)?.meta?.builtin_tool_config?.ENABLE_WEB_SEARCH_TOOL;
+		(model as any)?.info?.meta?.builtin_tool_config?.[key] ??
+		(model as any)?.meta?.builtin_tool_config?.[key];
 
 	return typeof value === 'boolean' ? value : null;
+};
+
+export const getModelBuiltinWebSearchPreference = (
+	model: Model | Record<string, any> | null | undefined
+): boolean | null => getModelBuiltinToolPreference(model, 'ENABLE_WEB_SEARCH_TOOL');
+
+export const resolveModelBuiltinImageGenerationPreference = (
+	selectedModels: (Model | Record<string, any>)[]
+): boolean | null => {
+	const preferences = selectedModels.map((model) =>
+		getModelBuiltinToolPreference(model, 'ENABLE_IMAGE_GENERATION_TOOL')
+	);
+
+	if (preferences.some((value) => value === false)) {
+		return false;
+	}
+	if (preferences.some((value) => value === true)) {
+		return true;
+	}
+
+	return null;
 };
 
 export const resolveModelBuiltinWebSearchState = (

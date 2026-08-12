@@ -211,6 +211,7 @@
 		translateWithDefault($i18n, key, defaultValue, options);
 
 	export let imageGenerationEnabled = false;
+	export let imageGenerationAllowed = true;
 	export let imageGenerationOptions: {
 		size?: string | null;
 		image_size?: string | null;
@@ -1722,6 +1723,7 @@
 											{webSearchModeOptions}
 											onWebSearchModeChange={setWebSearchModeFromUser}
 											bind:imageGenerationEnabled
+											{imageGenerationAllowed}
 											bind:codeInterpreterEnabled
 											responseHtmlFormat={$settings?.responseHtmlFormat ?? false}
 											onResponseHtmlFormatChange={setResponseHtmlFormatFromMenu}
@@ -1788,7 +1790,7 @@
 											</button>
 										</InputMenu>
 
-										{#if $config?.features?.enable_image_generation && ($_user.role === 'admin' || $_user?.permissions?.features?.image_generation) && (imageGenerationEnabled || imageGenerationPanelOpen)}
+										{#if imageGenerationAllowed && $config?.features?.enable_image_generation && ($_user.role === 'admin' || $_user?.permissions?.features?.image_generation) && (imageGenerationEnabled || imageGenerationPanelOpen)}
 											{#if imageGenerationEnabled}
 												<Tooltip
 													content={tr(

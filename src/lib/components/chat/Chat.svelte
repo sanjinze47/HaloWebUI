@@ -98,7 +98,10 @@
 	} from '$lib/utils/web-search-mode';
 	import { getFunctionPipeRootId } from '$lib/utils/image-generation';
 	import { isDedicatedImageGenerationModel } from '$lib/utils/model-capabilities';
-	import { resolveSelectedModelBuiltinWebSearchState } from '$lib/utils/model-web-search-preference';
+	import {
+		resolveModelBuiltinImageGenerationPreference,
+		resolveSelectedModelBuiltinWebSearchState
+	} from '$lib/utils/model-web-search-preference';
 	import { applyUserSettingsSnapshot } from '$lib/utils/user-settings';
 	import {
 		buildWebSearchModeOptions,
@@ -959,8 +962,31 @@
 		Boolean($config?.features?.enable_image_generation) &&
 		($user?.role === 'admin' || $user?.permissions?.features?.image_generation);
 
-	const isImageGenerationActiveForRequest = () =>
-		imageGenerationEnabled || Boolean(getSingleSelectedDedicatedImageModel());
+	const isImageGenerationActiveForRequest = () => {
+		const modelPreference = getSelectedModelBuiltinImageGenerationPreference();
+		if (modelPreference === false) {
+			return false;
+		}
+
+		return imageGenerationEnabled || Boolean(getSingleSelectedDedicatedImageModel());
+	};
+
+	const getSelectedModelBuiltinImageGenerationPreference = (): boolean | null => {
+		const ids = getResolvedSelectedModelIds();
+		if (ids.length === 0) {
+			return null;
+		}
+
+		const selected = ids.map((id) => getModelById(id)).filter(Boolean);
+		if (selected.length !== ids.length) {
+			return null;
+		}
+
+		return resolveModelBuiltinImageGenerationPreference(selected);
+	};
+
+	const isSelectedModelImageGenerationAllowed = () =>
+		getSelectedModelBuiltinImageGenerationPreference() !== false;
 
 	const getModelDefaultReasoningEffort = (model: Model | null | undefined): string | null =>
 		normalizeReasoningEffortValue((model as any)?.info?.params?.reasoning_effort ?? null);
@@ -1403,21 +1429,36 @@
 	const syncImageGenerationForDedicatedModel = ({ force = false } = {}) => {
 		const dedicatedImageModel = getSingleSelectedDedicatedImageModel();
 		const dedicatedImageSelectionKey = dedicatedImageModel ? getModelRequestId(dedicatedImageModel) : '';
+		const modelPreference = getSelectedModelBuiltinImageGenerationPreference();
+		const selectionKey = `${getResolvedSelectedModelIds().join('|')}:${
+			modelPreference === null ? 'inherit' : modelPreference ? 'on' : 'off'
+		}`;
 
-		if (!dedicatedImageSelectionKey) {
+		if (!canUseChatImageGeneration()) {
+			return false;
+		}
+
+		if (modelPreference === false) {
+			lastAutoImageGenerationSelectionKey = selectionKey;
+			if (imageGenerationEnabled) {
+				imageGenerationEnabled = false;
+				imageGenerationOptions = {};
+				return true;
+			}
+			return false;
+		}
+
+		if (!dedicatedImageSelectionKey && modelPreference === null) {
 			lastAutoImageGenerationSelectionKey = '';
 			return false;
 		}
 
-		if (
-			!canUseChatImageGeneration() ||
-			(!force && lastAutoImageGenerationSelectionKey === dedicatedImageSelectionKey)
-		) {
+		if (!force && lastAutoImageGenerationSelectionKey === selectionKey) {
 			return false;
 		}
 
-		lastAutoImageGenerationSelectionKey = dedicatedImageSelectionKey;
-		if (!imageGenerationEnabled) {
+		lastAutoImageGenerationSelectionKey = selectionKey;
+		if ((modelPreference === true || dedicatedImageSelectionKey) && !imageGenerationEnabled) {
 			imageGenerationEnabled = true;
 			return true;
 		}
@@ -1428,6 +1469,7 @@
 	$: {
 		selectedModelIds;
 		modelsMap;
+		imageGenerationEnabled;
 		$config?.features?.enable_image_generation;
 		$user?.role;
 		$user?.permissions?.features?.image_generation;
@@ -6434,6 +6476,7 @@
 								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
+								imageGenerationAllowed={isSelectedModelImageGenerationAllowed()}
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								{webSearchModeSource}
@@ -6492,6 +6535,7 @@
 								bind:skillSelectionTouched
 								bind:imageGenerationEnabled
 								bind:imageGenerationOptions
+								imageGenerationAllowed={isSelectedModelImageGenerationAllowed()}
 								bind:codeInterpreterEnabled
 								bind:webSearchMode
 								{webSearchModeSource}

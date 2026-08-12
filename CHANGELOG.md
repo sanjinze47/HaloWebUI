@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Video Generation is enabled by default when no environment override is supplied, and its workspace
   entry is displayed immediately beside Image Generation with Chinese UI text in the Simplified Chinese locale.
 
+### Fixed
+
+- Fixed model-level built-in tool settings being ignored at runtime and synchronized image-generation defaults remaining enabled after switching to a model that disables image generation.
+
 ## [0.2.7] - 2026-08-11
 
 ### Fixed
