@@ -12,6 +12,7 @@ export interface ModelCapabilities {
 	webSearch: boolean; // 联网搜索
 	free: boolean; // 免费模型
 	imageGen: boolean; // 图像生成
+	videoGen: boolean; // 视频生成
 	embedding: boolean; // 嵌入模型
 	rerank: boolean; // 重排模型
 }
@@ -50,6 +51,23 @@ const DEDICATED_IMAGE_MODEL_REGEXES = [
 ];
 const NEGATIVE_IMAGE_MODEL_REGEXES = [/(^|[\/._:-])video([\/._:-]|$)/i];
 
+const DEDICATED_VIDEO_MODEL_PATTERNS = [
+	'grok-imagine-video',
+	'sora',
+	'veo',
+	'kling',
+	'runway',
+	'luma-dream-machine',
+	'wan-video',
+	'hunyuan-video',
+	'seedance',
+	'pixverse',
+	'hailuo-video',
+	'vidu',
+	'gen-3',
+	'pika'
+];
+
 const isNegativeImageModel = (id: string): boolean =>
 	NEGATIVE_IMAGE_MODEL_REGEXES.some((pattern) => pattern.test(id));
 
@@ -66,6 +84,7 @@ export function inferModelCapabilities(modelId: string): ModelCapabilities {
 		webSearch: inferWebSearch(id),
 		free: inferFree(id),
 		imageGen: inferImageGen(id),
+		videoGen: inferVideoGen(id),
 		embedding: inferEmbedding(id),
 		rerank: inferRerank(id)
 	};
@@ -238,6 +257,16 @@ function inferImageGen(id: string): boolean {
 	return imageGenPatterns.some((p) => id.includes(p));
 }
 
+// This is a display fallback only. Video submission must use server-normalized capability data.
+function inferVideoGen(id: string): boolean {
+	return DEDICATED_VIDEO_MODEL_PATTERNS.some((pattern) => id.includes(pattern));
+}
+
+export function isDedicatedVideoGenerationModel(modelId: string): boolean {
+	const id = modelId.toLowerCase().split('/').pop() ?? modelId.toLowerCase();
+	return DEDICATED_VIDEO_MODEL_PATTERNS.some((pattern) => id.includes(pattern));
+}
+
 export function isDedicatedImageGenerationModel(modelId: string): boolean {
 	const id = modelId.toLowerCase().split('/').pop() ?? modelId.toLowerCase();
 
@@ -304,6 +333,10 @@ export const capabilityInfo = {
 	imageGen: {
 		label: 'Image Generation',
 		labelZh: '生图'
+	},
+	videoGen: {
+		label: 'Video Generation',
+		labelZh: '视频生成'
 	},
 	embedding: {
 		label: 'Embedding',

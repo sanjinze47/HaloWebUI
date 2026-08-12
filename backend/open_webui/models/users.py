@@ -408,6 +408,7 @@ class UsersTable:
         from open_webui.models.channels import Channels
         from open_webui.models.folders import Folders
         from open_webui.models.tags import Tags
+        from open_webui.models.video_generation_jobs import VideoGenerationJobs
 
         operations = [
             ("groups", lambda: Groups.remove_user_from_all_groups(id)),
@@ -424,6 +425,7 @@ class UsersTable:
             ("channels", lambda: Channels.delete_channels_by_user_id(id)),
             ("folders", lambda: Folders.delete_folders_by_user_id(id)),
             ("tags", lambda: Tags.delete_tags_by_user_id(id)),
+            ("video_generation_jobs", lambda: VideoGenerationJobs.delete_jobs_by_user_id(id)),
         ]
         failures: list[dict[str, str]] = []
         for resource_type, operation in operations:

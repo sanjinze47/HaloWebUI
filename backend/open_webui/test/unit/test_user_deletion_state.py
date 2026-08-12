@@ -18,6 +18,7 @@ _LAZY_TABLES = {
     "channels": "Channels",
     "folders": "Folders",
     "tags": "Tags",
+    "video_generation_jobs": "VideoGenerationJobs",
 }
 
 
@@ -48,6 +49,7 @@ def _install_cleanup_tables(monkeypatch):
         "channels": "delete_channels_by_user_id",
         "folders": "delete_folders_by_user_id",
         "tags": "delete_tags_by_user_id",
+        "video_generation_jobs": "delete_jobs_by_user_id",
     }
     for resource_type, method_name in operations.items():
         monkeypatch.setattr(

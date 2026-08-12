@@ -78,6 +78,8 @@
 			| 'max_completion_tokens'
 			| string;
 		image_edit_compatibility?: 'standard' | 'grok2api' | string;
+		video_generation_compatibility?: 'disabled' | 'grok2api' | string;
+		video_generation_model_ids?: string[];
 		// Anthropic-specific
 		anthropic_version?: string;
 		anthropic_beta?: string[];
@@ -219,6 +221,18 @@
 	let geminiCompatibilityMode: 'strict' | 'auto' = 'strict';
 	let chatCompletionTokenParameter: 'auto' | 'max_tokens' | 'max_completion_tokens' = 'auto';
 	let imageEditCompatibility: 'standard' | 'grok2api' = 'standard';
+	let videoGenerationCompatibility: 'disabled' | 'grok2api' = 'disabled';
+	let videoGenerationModelIdsInput = '';
+
+	const getVideoGenerationModelIds = () =>
+		Array.from(
+			new Set(
+				videoGenerationModelIdsInput
+					.split(/[\n,]/)
+					.map((value) => value.trim())
+					.filter(Boolean)
+			)
+		);
 
 	// Anthropic settings
 	let anthropicVersion = '2023-06-01';
@@ -802,7 +816,9 @@
 				...(!ollama && !gemini && !grok && !anthropic
 					? {
 							chat_completion_token_parameter: chatCompletionTokenParameter,
-							image_edit_compatibility: imageEditCompatibility
+							image_edit_compatibility: imageEditCompatibility,
+							video_generation_compatibility: videoGenerationCompatibility,
+							video_generation_model_ids: getVideoGenerationModelIds()
 						}
 					: {}),
 				...(azure ? { azure: true } : {}),
@@ -1458,7 +1474,9 @@
 					...(!ollama && !gemini && !grok && !anthropic
 						? {
 								chat_completion_token_parameter: chatCompletionTokenParameter,
-								image_edit_compatibility: imageEditCompatibility
+								image_edit_compatibility: imageEditCompatibility,
+								video_generation_compatibility: videoGenerationCompatibility,
+								video_generation_model_ids: getVideoGenerationModelIds()
 							}
 						: {}),
 					headers: headers ? JSON.parse(headers) : undefined,
@@ -1566,6 +1584,8 @@
 			geminiCompatibilityMode = 'strict';
 			chatCompletionTokenParameter = 'auto';
 			imageEditCompatibility = 'standard';
+			videoGenerationCompatibility = 'disabled';
+			videoGenerationModelIdsInput = '';
 			nativeFileInputsTouched = false;
 			anthropicVersion = '2023-06-01';
 			anthropicVersionMode = '2023-06-01';
@@ -1642,6 +1662,12 @@
 						? 'grok2api'
 						: 'standard'
 			) as 'standard' | 'grok2api';
+			videoGenerationCompatibility = (
+				['disabled', 'grok2api'].includes(connection.config?.video_generation_compatibility ?? '')
+					? connection.config?.video_generation_compatibility
+					: 'disabled'
+			) as 'disabled' | 'grok2api';
+			videoGenerationModelIdsInput = (connection.config?.video_generation_model_ids ?? []).join('\n');
 
 			if (ollama) {
 				connectionType = connection.config?.connection_type ?? 'local';
@@ -1723,6 +1749,8 @@
 			geminiCompatibilityMode = 'strict';
 			chatCompletionTokenParameter = 'auto';
 			imageEditCompatibility = 'standard';
+			videoGenerationCompatibility = 'disabled';
+			videoGenerationModelIdsInput = '';
 			key = '';
 			keyPool = normalizeApiKeyPool(null, '');
 			if (gemini) {
@@ -2586,6 +2614,42 @@
 											className="w-full"
 										/>
 									</div>
+								{/if}
+
+								{#if !ollama && !gemini && !grok && !anthropic && !isForceMode}
+								<div class="grid gap-3 md:grid-cols-2">
+									<div class="flex flex-col gap-1">
+										<label for="video-generation-compatibility" class="text-xs text-gray-500">
+											{$i18n.t('Video Generation Compatibility')}
+										</label>
+										<HaloSelect
+											triggerId="video-generation-compatibility"
+											bind:value={videoGenerationCompatibility}
+											options={[
+												{ value: 'disabled', label: $i18n.t('Disabled') },
+												{ value: 'grok2api', label: 'grok2api' }
+											]}
+											className="w-full"
+										/>
+										<div class="text-xs text-gray-400">
+											{$i18n.t('Enable this only when the OpenAI-compatible endpoint exposes the grok2api video routes.')}
+										</div>
+									</div>
+									<div class="flex flex-col gap-1">
+										<label for="video-generation-model-ids" class="text-xs text-gray-500">
+											{$i18n.t('Video Generation Model IDs')}
+										</label>
+										<textarea
+											id="video-generation-model-ids"
+											class="w-full min-h-16 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg focus:outline-none"
+											bind:value={videoGenerationModelIdsInput}
+											placeholder="grok-imagine-video"
+										/>
+										<div class="text-xs text-gray-400">
+											{$i18n.t('Optional model IDs, one per line or separated by commas. Built-in grok2api models are included automatically.')}
+										</div>
+									</div>
+								</div>
 								{/if}
 
 								{#if !ollama && !direct && !gemini && !grok && !anthropic && !azure && !isForceMode}

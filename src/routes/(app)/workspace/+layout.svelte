@@ -10,6 +10,7 @@
 		getActiveWorkspaceTab,
 		getVisibleWorkspaceTabs
 	} from '$lib/components/workspace/shell/meta';
+	import { canAccessVideoGeneration } from '$lib/utils/video-access';
 
 	const i18n = getContext('i18n');
 
@@ -18,6 +19,11 @@
 	let visibleTabs = [];
 
 	onMount(async () => {
+		if ($page.url.pathname.includes('/videos') && !canAccessVideoGeneration($config, $user)) {
+			await goto('/');
+			return;
+		}
+
 		if ($user?.role !== 'admin') {
 			if ($page.url.pathname.includes('/terminal')) {
 				goto('/');

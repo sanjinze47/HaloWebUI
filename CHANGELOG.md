@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added an administrator-controlled Video Generation workspace at `/workspace/videos`
+  for grok2api-compatible OpenAI connections, supporting text-to-video and single-image-to-video jobs.
+- Added backend capability metadata, persistent job history, progress polling, MP4 archiving,
+  result download/deletion, shared-key controls, and the `Video Generation` user-group permission.
+
 ## [0.2.7] - 2026-08-11
 
 ### Fixed

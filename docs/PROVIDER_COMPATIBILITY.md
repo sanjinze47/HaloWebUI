@@ -71,6 +71,25 @@ upstream commit, and verification date. Distinguish:
   400 unsupported-field error. Explicit tools, search, thinking, and image output
   requests are required capabilities and are never silently removed.
 
+### grok2api video generation
+
+The video adapter targets the public grok2api `v3.1.2` release (verified 2026-08-12)
+through an OpenAI-compatible connection explicitly configured with
+`video_generation_compatibility: "grok2api"`. The confirmed routes are:
+
+- `POST /v1/videos/generations` for asynchronous text-to-video and image-to-video submission;
+- `GET /v1/videos/{request_id}` for status and progress;
+- `GET /v1/videos/{request_id}/content` for the generated MP4 stream.
+
+The submitted fields are `model`, optional `prompt`, optional `image.url` Data URL,
+`duration`, `aspect_ratio`, and `resolution`. HaloWebUI currently accepts one JPEG,
+PNG, or WebP reference image up to 20 MiB, durations from 1 to 15 seconds, ratios
+`1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, and `2:3`, and resolutions `480p` and
+`720p`. The adapter requires `video/mp4`, an MP4 `ftyp` header, and a maximum output
+size of 256 MiB before archiving the result. These claims are based on the upstream
+route contract and sanitized fixtures; a live provider smoke test still requires a
+local grok2api credential.
+
 Responses streams are successful only after `response.completed`, the supported
 `response.done` compatibility event, or an explicit transport `[DONE]`. A raw EOF,
 failure event, or incomplete/cancelled response is normalized as an error in both

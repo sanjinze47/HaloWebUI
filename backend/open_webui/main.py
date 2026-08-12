@@ -64,6 +64,7 @@ from open_webui.routers import (
     analytics,
     audio,
     images,
+    videos,
     ollama,
     openai,
     gemini,
@@ -195,6 +196,8 @@ from open_webui.config import (
     COMFYUI_WORKFLOW_NODES,
     ENABLE_IMAGE_GENERATION,
     ENABLE_IMAGE_GENERATION_SHARED_KEY,
+    ENABLE_VIDEO_GENERATION,
+    ENABLE_VIDEO_GENERATION_SHARED_KEY,
     ENABLE_IMAGE_PROMPT_GENERATION,
     IMAGE_GENERATION_ENGINE,
     IMAGE_GENERATION_MODEL,
@@ -651,6 +654,8 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_retry_file_cleanup())
 
+    await videos.start_video_generation_worker(app)
+
     # HaloClaw: start messaging gateway adapters
     from open_webui.haloclaw.lifecycle import startup_haloclaw, shutdown_haloclaw
 
@@ -663,6 +668,11 @@ async def lifespan(app: FastAPI):
         await shutdown_haloclaw(app)
     except Exception as e:
         log.error(f"Error during HaloClaw shutdown: {e}")
+
+    try:
+        await videos.stop_video_generation_worker()
+    except Exception as e:
+        log.error(f"Error during video generation shutdown: {e}")
 
     try:
         await MCPStdioProcessManager.instance().stop_all()
@@ -1153,6 +1163,8 @@ app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIM
 app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
 app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
 app.state.config.ENABLE_IMAGE_GENERATION_SHARED_KEY = ENABLE_IMAGE_GENERATION_SHARED_KEY
+app.state.config.ENABLE_VIDEO_GENERATION = ENABLE_VIDEO_GENERATION
+app.state.config.ENABLE_VIDEO_GENERATION_SHARED_KEY = ENABLE_VIDEO_GENERATION_SHARED_KEY
 app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
 
 app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
@@ -1416,6 +1428,7 @@ app.include_router(anthropic.router, prefix="/anthropic", tags=["anthropic"])
 
 app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
+app.include_router(videos.router, prefix="/api/v1/videos", tags=["videos"])
 
 app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
@@ -2184,6 +2197,7 @@ async def get_app_config(request: Request):
                     "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
+                    "enable_video_generation": app.state.config.ENABLE_VIDEO_GENERATION,
                     "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,

@@ -36,6 +36,7 @@
 			direct_tool_servers: false,
 			web_search: true,
 			image_generation: true,
+			video_generation: false,
 			code_interpreter: true
 		}
 	};
@@ -218,6 +219,10 @@
 			<div class="glass-item px-4 py-3 flex items-center justify-between">
 				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Image Generation')}</div>
 				<Switch bind:state={permissions.features.image_generation} />
+			</div>
+			<div class="glass-item px-4 py-3 flex items-center justify-between">
+				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Video Generation')}</div>
+				<Switch bind:state={permissions.features.video_generation} />
 			</div>
 			<div class="glass-item px-4 py-3 flex items-center justify-between">
 				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Code Interpreter')}</div>

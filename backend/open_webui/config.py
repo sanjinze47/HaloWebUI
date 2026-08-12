@@ -1733,6 +1733,8 @@ USER_PERMISSIONS_FEATURES_IMAGE_GENERATION = (
     == "true"
 )
 
+USER_PERMISSIONS_FEATURES_VIDEO_GENERATION = False
+
 USER_PERMISSIONS_FEATURES_CODE_INTERPRETER = (
     os.environ.get("USER_PERMISSIONS_FEATURES_CODE_INTERPRETER", "True").lower()
     == "true"
@@ -1768,6 +1770,7 @@ DEFAULT_USER_PERMISSIONS = {
         "direct_tool_servers": USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         "web_search": USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         "image_generation": USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
+        "video_generation": USER_PERMISSIONS_FEATURES_VIDEO_GENERATION,
         "code_interpreter": USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
     },
 }
@@ -3361,6 +3364,18 @@ ENABLE_IMAGE_GENERATION_SHARED_KEY = PersistentConfig(
     "ENABLE_IMAGE_GENERATION_SHARED_KEY",
     "image_generation.shared_key.enable",
     os.environ.get("ENABLE_IMAGE_GENERATION_SHARED_KEY", "False").lower() == "true",
+)
+
+ENABLE_VIDEO_GENERATION = PersistentConfig(
+    "ENABLE_VIDEO_GENERATION",
+    "video_generation.enable",
+    os.environ.get("ENABLE_VIDEO_GENERATION", "False").lower() == "true",
+)
+
+ENABLE_VIDEO_GENERATION_SHARED_KEY = PersistentConfig(
+    "ENABLE_VIDEO_GENERATION_SHARED_KEY",
+    "video_generation.shared_key.enable",
+    os.environ.get("ENABLE_VIDEO_GENERATION_SHARED_KEY", "False").lower() == "true",
 )
 
 ENABLE_IMAGE_PROMPT_GENERATION = PersistentConfig(

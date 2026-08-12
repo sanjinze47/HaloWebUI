@@ -24,6 +24,7 @@
 		getNativeWebSearchSupport
 	} from '$lib/utils/native-web-search';
 	import { getApiKeyForRequest, getApiKeyPoolRequestConfig } from '$lib/utils/api-key-pool';
+	import { Video } from 'lucide-svelte';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -107,12 +108,14 @@
 		| 'tools'
 		| 'free'
 		| 'imageGen'
+		| 'videoGen'
 		| 'embedding'
 		| 'rerank'
 		| 'selected';
 	let activeTag: FilterTag = 'all';
 	let filterTags: { key: FilterTag; label: string }[] = [];
 	$: filterTags = [
+		{ key: 'videoGen', label: 'Video Generation' },
 		{ key: 'all', label: tr('全部', 'All') },
 		{ key: 'selected', label: tr('已选', 'Selected') },
 		{ key: 'reasoning', label: tr('推理', 'Reasoning') },
@@ -557,6 +560,11 @@
 												<Photo className="size-3.5 text-purple-500" />
 											</Tooltip>
 										{/if}
+										{#if caps.videoGen}
+											<Tooltip content={$i18n.t('Video Generation')}>
+												<Video class="size-3.5 text-indigo-500" />
+											</Tooltip>
+										{/if}
 										{#if caps.vision}
 											<Tooltip content={$i18n.t('Vision')}>
 												<Eye className="size-3.5 text-cyan-500" />
@@ -641,9 +649,14 @@
 								{#if caps.imageGen}
 									<Tooltip content={$i18n.t('Image Generation')}>
 										<Photo className="size-3.5 text-purple-500" />
-									</Tooltip>
-								{/if}
-								{#if caps.vision}
+										</Tooltip>
+									{/if}
+									{#if caps.videoGen}
+										<Tooltip content={$i18n.t('Video Generation')}>
+											<Video class="size-3.5 text-indigo-500" />
+										</Tooltip>
+									{/if}
+									{#if caps.vision}
 									<Tooltip content={$i18n.t('Vision')}>
 										<Eye className="size-3.5 text-cyan-500" />
 									</Tooltip>

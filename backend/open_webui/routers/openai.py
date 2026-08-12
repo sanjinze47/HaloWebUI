@@ -93,6 +93,10 @@ from open_webui.utils.api_key_pool import (
     normalize_api_key_pool_config,
     should_retry_api_key,
 )
+from open_webui.utils.video_generation import (
+    normalize_video_generation_config,
+    resolve_video_generation_capability,
+)
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
@@ -1277,6 +1281,15 @@ def _apply_native_web_search_support_to_models_response(
                 model_support.get("supported") is True
             )
             model["native_web_search_support"] = dict(model_support)
+            model_id = model.get("original_id") or strip_model_prefix(
+                model.get("id") or "", (api_config or {}).get("_resolved_prefix_id")
+            )
+            model.update(
+                resolve_video_generation_capability(
+                    model_id,
+                    api_config,
+                )
+            )
 
     meta = body.get("_openwebui")
     body["_openwebui"] = meta if isinstance(meta, dict) else {}
@@ -1734,15 +1747,18 @@ def openai_o1_o3_handler(payload):
     return payload
 
 
-def _validate_openai_api_configs(configs: Any) -> None:
+def _validate_openai_api_configs(configs: Any) -> dict:
     if not isinstance(configs, dict):
         raise ValueError("OPENAI_API_CONFIGS must be an object.")
-    for config in configs.values():
+    normalized_configs = {}
+    for key, config in configs.items():
         if not isinstance(config, dict):
             raise ValueError("Each OpenAI API config must be an object.")
         resolve_responses_compatibility(config)
         resolve_chat_completion_token_parameter(config)
         resolve_openai_image_edit_compatibility(config)
+        normalized_configs[key] = normalize_video_generation_config(config)
+    return normalized_configs
 
 
 ##########################################
@@ -1776,7 +1792,9 @@ async def update_config(
     request: Request, form_data: OpenAIConfigForm, user=Depends(get_admin_user)
 ):
     try:
-        _validate_openai_api_configs(form_data.OPENAI_API_CONFIGS)
+        normalized_form_configs = _validate_openai_api_configs(
+            form_data.OPENAI_API_CONFIGS
+        )
     except (ResponsesCompatibilityError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1827,7 +1845,7 @@ async def update_config(
                 - len(request.app.state.config.OPENAI_API_KEYS)
             )
 
-    request.app.state.config.OPENAI_API_CONFIGS = form_data.OPENAI_API_CONFIGS
+    request.app.state.config.OPENAI_API_CONFIGS = normalized_form_configs
 
     # Remove the API configs that are not in the API URLS
     keys = list(map(str, range(len(request.app.state.config.OPENAI_API_BASE_URLS))))
@@ -2223,6 +2241,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 model_support.get("supported") is True
             )
             model["native_web_search_support"] = dict(model_support)
+            model.update(
+                resolve_video_generation_capability(
+                    original_id,
+                    api_config,
+                )
+            )
 
             if prefix_id:
                 model["original_id"] = original_id

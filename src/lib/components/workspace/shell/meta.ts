@@ -1,3 +1,5 @@
+import { canAccessVideoGeneration } from '$lib/utils/video-access';
+
 export type WorkspaceTabKey =
 	| 'models'
 	| 'knowledge'
@@ -7,6 +9,7 @@ export type WorkspaceTabKey =
 	| 'functions'
 	| 'skills'
 	| 'images'
+	| 'videos'
 	| 'assistants'
 	| 'terminal';
 
@@ -32,7 +35,8 @@ const WORKSPACE_TAB_ORDER: WorkspaceTabKey[] = [
 	'skills',
 	'functions',
 	'terminal',
-	'images'
+	'images',
+	'videos'
 ];
 
 export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
@@ -157,6 +161,20 @@ export const WORKSPACE_TABS: WorkspaceTabMeta[] = [
 		activeMatch: ['/workspace/images'],
 		visibleWhen: ({ user }) =>
 			user?.role === 'admin' || user?.permissions?.features?.image_generation
+	},
+	{
+		key: 'videos',
+		href: '/workspace/videos',
+		labelKey: 'Videos',
+		descKey:
+			'Create short videos from a prompt or one reference image with a capability-aware model.',
+		badgeColor: 'bg-indigo-50 dark:bg-indigo-950/30',
+		iconColor: 'text-indigo-500 dark:text-indigo-400',
+		iconPaths: [
+			'M4.5 5.25A2.25 2.25 0 0 1 6.75 3h6.5a2.25 2.25 0 0 1 2.25 2.25v1.129l3.804-2.283A1.5 1.5 0 0 1 21.5 5.383v13.234a1.5 1.5 0 0 1-2.196 1.287L15.5 17.621v1.129A2.25 2.25 0 0 1 13.25 21h-6.5a2.25 2.25 0 0 1-2.25-2.25V5.25Zm11 3.377v6.746l3.5 2.1V6.527l-3.5 2.1Z'
+		],
+		activeMatch: ['/workspace/videos'],
+		visibleWhen: ({ user, config }) => canAccessVideoGeneration(config, user)
 	},
 	{
 		key: 'assistants',

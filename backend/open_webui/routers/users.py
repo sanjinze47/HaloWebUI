@@ -206,6 +206,7 @@ class FeaturesPermissions(BaseModel):
     direct_tool_servers: bool = False
     web_search: bool = True
     image_generation: bool = True
+    video_generation: bool = False
     code_interpreter: bool = True
 
 

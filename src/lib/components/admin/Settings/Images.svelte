@@ -4,6 +4,7 @@
 	import { config as backendConfig, user } from '$lib/stores';
 	import { getBackendConfig } from '$lib/apis';
 	import { getConfig, updateConfig, getImageGenerationConfig, updateImageGenerationConfig } from '$lib/apis/images';
+	import { getVideoConfig, updateVideoConfig } from '$lib/apis/videos';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import InlineDirtyActions from './InlineDirtyActions.svelte';
@@ -15,6 +16,8 @@
 	let loading = false;
 	let config = null;
 	let imageGenerationConfig = { IMAGE_MODEL_FILTER_REGEX: '' };
+	let videoGenerationConfig = { enabled: false, shared_key_enabled: false };
+	let videoConfigLoaded = false;
 	let initialSnapshot = null;
 
 	const getErrorText = (error) => {
@@ -54,19 +57,26 @@
 
 	const normalizeImageSettingsSnapshot = (
 		sourceConfig = config,
-		sourceImageConfig = imageGenerationConfig
+		sourceImageConfig = imageGenerationConfig,
+		sourceVideoConfig = videoGenerationConfig
 	) => ({
 		enabled: sourceConfig?.enabled === true,
 		shared_key_enabled: sourceConfig?.shared_key_enabled === true,
-		IMAGE_MODEL_FILTER_REGEX: `${sourceImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
+		IMAGE_MODEL_FILTER_REGEX: `${sourceImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`,
+		video_enabled: sourceVideoConfig?.enabled === true,
+		video_shared_key_enabled: sourceVideoConfig?.shared_key_enabled === true
 	});
 
-	$: snapshot = normalizeImageSettingsSnapshot(config, imageGenerationConfig);
+	$: snapshot = normalizeImageSettingsSnapshot(config, imageGenerationConfig, videoGenerationConfig);
 	$: isDirty = !!(initialSnapshot && config && !isSettingsSnapshotEqual(snapshot, initialSnapshot));
 
-	const syncBaseline = (sourceConfig = config, sourceImageConfig = imageGenerationConfig) => {
+	const syncBaseline = (
+		sourceConfig = config,
+		sourceImageConfig = imageGenerationConfig,
+		sourceVideoConfig = videoGenerationConfig
+	) => {
 		initialSnapshot = cloneSettingsSnapshot(
-			normalizeImageSettingsSnapshot(sourceConfig, sourceImageConfig)
+			normalizeImageSettingsSnapshot(sourceConfig, sourceImageConfig, sourceVideoConfig)
 		);
 	};
 
@@ -81,6 +91,11 @@
 			...imageGenerationConfig,
 			IMAGE_MODEL_FILTER_REGEX: initialSnapshot.IMAGE_MODEL_FILTER_REGEX
 		};
+		videoGenerationConfig = {
+			...videoGenerationConfig,
+			enabled: initialSnapshot.video_enabled,
+			shared_key_enabled: initialSnapshot.video_shared_key_enabled
+		};
 	};
 
 	const serializeConfigForSave = (draftConfig) => ({
@@ -92,14 +107,23 @@
 		IMAGE_MODEL_FILTER_REGEX: `${draftImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
 	});
 
+	const serializeVideoGenerationConfigForSave = (draftVideoConfig) => ({
+		enabled: draftVideoConfig?.enabled === true,
+		shared_key_enabled: draftVideoConfig?.shared_key_enabled === true
+	});
+
 	const loadImageSettings = async () => {
-		const [loadedConfig, loadedImageConfig] = await Promise.all([
+		const [loadedConfig, loadedImageConfig, loadedVideoConfig] = await Promise.all([
 			getConfig(localStorage.token).catch((error) => {
 				toast.error(formatImageSettingsError(error));
 				return null;
 			}),
 			getImageGenerationConfig(localStorage.token).catch((error) => {
 				toast.error(formatImageSettingsError(error));
+				return null;
+			}),
+			getVideoConfig(localStorage.token).catch((error) => {
+				videoConfigLoaded = false;
 				return null;
 			})
 		]);
@@ -109,6 +133,14 @@
 			imageGenerationConfig = {
 				...imageGenerationConfig,
 				IMAGE_MODEL_FILTER_REGEX: `${loadedImageConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
+			};
+		}
+		if (loadedVideoConfig) {
+			videoConfigLoaded = true;
+			videoGenerationConfig = {
+				...videoGenerationConfig,
+				enabled: loadedVideoConfig?.enabled === true,
+				shared_key_enabled: loadedVideoConfig?.shared_key_enabled === true
 			};
 		}
 	};
@@ -128,8 +160,17 @@
 			toast.error(formatImageSettingsError(error));
 			return null;
 		});
+		const updatedVideoConfig = videoConfigLoaded
+			? await updateVideoConfig(
+					localStorage.token,
+					serializeVideoGenerationConfigForSave(videoGenerationConfig)
+				  ).catch((error) => {
+					toast.error(formatImageSettingsError(error));
+					return null;
+				  })
+			: videoGenerationConfig;
 
-		if (!updatedConfig || !updatedImageGenerationConfig) {
+		if (!updatedConfig || !updatedImageGenerationConfig || (videoConfigLoaded && !updatedVideoConfig)) {
 			loading = false;
 			return;
 		}
@@ -139,9 +180,16 @@
 			...imageGenerationConfig,
 			IMAGE_MODEL_FILTER_REGEX: `${updatedImageGenerationConfig?.IMAGE_MODEL_FILTER_REGEX ?? ''}`
 		};
+		if (updatedVideoConfig) {
+			videoGenerationConfig = {
+				...videoGenerationConfig,
+				enabled: updatedVideoConfig?.enabled === true,
+				shared_key_enabled: updatedVideoConfig?.shared_key_enabled === true
+			};
+		}
 		backendConfig.set(await getBackendConfig());
 		await tick();
-		syncBaseline(config, imageGenerationConfig);
+		syncBaseline(config, imageGenerationConfig, videoGenerationConfig);
 		dispatch('save');
 		loading = false;
 	};
@@ -186,6 +234,36 @@
 								</div>
 							</div>
 							<Switch bind:state={config.shared_key_enabled} />
+						</div>
+					</div>
+				</section>
+
+				<section class="glass-section p-5 space-y-5 {isDirty ? 'glass-section-dirty' : ''}">
+					<div class="text-base font-semibold text-gray-800 dark:text-gray-100">
+						{$i18n.t('Video Generation')}
+					</div>
+					<div class="space-y-3">
+						<div class="flex items-center justify-between glass-item px-4 py-3">
+							<div>
+								<div class="text-sm font-medium">{$i18n.t('Video Generation')}</div>
+								<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('Allow users to create videos in the video workspace.')}
+								</div>
+							</div>
+							<Switch bind:state={videoGenerationConfig.enabled} disabled={!videoConfigLoaded} />
+						</div>
+
+						<div class="flex items-center justify-between glass-item px-4 py-3">
+							<div>
+								<div class="text-sm font-medium">{$i18n.t('Allow users to use the workspace shared key')}</div>
+								<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('Use the configured shared provider key for video generation when available.')}
+								</div>
+							</div>
+							<Switch
+								bind:state={videoGenerationConfig.shared_key_enabled}
+								disabled={!videoConfigLoaded}
+							/>
 						</div>
 					</div>
 				</section>
